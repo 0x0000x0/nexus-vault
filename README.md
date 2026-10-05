@@ -20,6 +20,11 @@ A local-first Windows desktop app for knowledge management, built with Electron,
 - 100% local: hashing-trick embeddings computed in the app, kept in memory, no model download, no network.
 - Turn off again via the setting `semanticSearch: false` (settings.json in app data) — keyword search is unchanged either way.
 
+## Citations / Sources
+- After a Ctrl+K search, opening a result (or Ctrl+Enter) shows a **Sources** panel listing the hits with path + snippet; click to open, **Copy** to get Markdown citations.
+- MCP `search` returns keyword + semantic hits (when semantic is on), each with `path`, `title`, `snippet`, `startLine`, `source` and a ready-made `cite` link.
+- Memory packs apply to AI-facing results: **Never include** folders are dropped from MCP search/list/backlinks, `get_note`/`append_note` refuse them, and semantic results/Related notes skip them; **Always include** folders rank first.
+
 ## Privacy Statement
 
 Nexus Vault is **local-first** and **offline by design**:

@@ -4,7 +4,15 @@ import type { SearchHit } from '../../../shared/types';
 
 type Hit = SearchHit & { semantic?: boolean };
 
-export function QuickSearch({ onPick, onClose }: { onPick: (rel: string) => void; onClose: () => void }) {
+export function QuickSearch({
+  onPick,
+  onClose,
+  onSources,
+}: {
+  onPick: (rel: string) => void;
+  onClose: () => void;
+  onSources?: (q: string, hits: Hit[]) => void;
+}) {
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<Hit[]>([]);
   const [i, setI] = useState(0);
@@ -69,7 +77,11 @@ export function QuickSearch({ onPick, onClose }: { onPick: (rel: string) => void
             if (e.key === 'Escape') onClose();
             else if (e.key === 'ArrowDown') setI(Math.min(hits.length - 1, i + 1));
             else if (e.key === 'ArrowUp') setI(Math.max(0, i - 1));
-            else if (e.key === 'Enter' && hits[i]) onPick(hits[i].rel);
+            else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && q.trim() && hits.length && onSources) onSources(q.trim(), hits);
+            else if (e.key === 'Enter' && hits[i]) {
+              if (q.trim() && onSources) onSources(q.trim(), hits);
+              onPick(hits[i].rel);
+            }
             else return;
             e.preventDefault();
           }}
@@ -94,7 +106,10 @@ export function QuickSearch({ onPick, onClose }: { onPick: (rel: string) => void
         <div className="qlist" ref={listRef}>
           {hits.length === 0 && <div className="muted" style={{ padding: 12 }}>{q ? 'No matches.' : 'No notes indexed yet.'}</div>}
           {hits.map((h, k) => (
-            <div key={h.rel} className={`qi${k === i ? ' on' : ''}`} onMouseEnter={() => setI(k)} onClick={() => onPick(h.rel)}>
+            <div key={h.rel} className={`qi${k === i ? ' on' : ''}`} onMouseEnter={() => setI(k)} onClick={() => {
+                if (q.trim() && onSources) onSources(q.trim(), hits);
+                onPick(h.rel);
+              }}>
               <div className="qt">
                 {mark(h.title)} {h.folder && <small>{h.folder}</small>} {h.semantic && <span className="badge" title={`Similarity ${Math.round(h.score * 100)}%`}>similar</span>}
               </div>
@@ -102,7 +117,7 @@ export function QuickSearch({ onPick, onClose }: { onPick: (rel: string) => void
             </div>
           ))}
         </div>
-        <div className="qfoot">↑↓ to move · Enter to open · Esc to close</div>
+        <div className="qfoot">↑↓ to move · Enter to open · Ctrl+Enter to list as Sources · Esc to close</div>
       </div>
     </div>
   );

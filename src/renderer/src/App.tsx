@@ -8,6 +8,7 @@ import { FolderTree } from './components/FolderTree';
 import { GraphPane } from './components/GraphPane';
 import { NotePanel } from './components/NotePanel';
 import { QuickSearch } from './components/QuickSearch';
+import { Sources, type SourceHit } from './components/Sources';
 import { RepoDrop } from './components/RepoDrop';
 import { StatusBar } from './components/StatusBar';
 import { TitleBar } from './components/TitleBar';
@@ -46,6 +47,8 @@ export function App() {
   const [boardKey, setBoardKey] = useState(0);
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [quick, setQuick] = useState(false);
+  const [sources, setSources] = useState<{ q: string; hits: SourceHit[] } | null>(null);
+  useEffect(() => setSources(null), [vault?.path]);
   const [isAiAccessOpen, setIsAiAccessOpen] = useState(false);
   const [repoDrop, setRepoDrop] = useState(false);
   const [showSnapshots, setShowSnapshots] = useState(false);
@@ -504,6 +507,7 @@ export function App() {
                 </div>
               )}
               {busy && <div className="banner"><div className="spin" />{busy}</div>}
+              {sources && <Sources q={sources.q} hits={sources.hits} onClose={() => setSources(null)} />}
               {layout.view === 'split' ? (
                 <>
                   <div style={{ flex: `0 0 calc(${layout.paneRatio * 100}% - 3.5px)`, display: 'flex', minWidth: 0 }}>{left}</div>
@@ -539,6 +543,10 @@ export function App() {
             {quick && (
               <QuickSearch
                 onClose={() => setQuick(false)}
+                onSources={(q, hits) => {
+                  setSources({ q, hits: hits.slice(0, 30) });
+                  setQuick(false);
+                }}
                 onPick={(rel) => {
                   setQuick(false);
                   actions.openNote(rel);

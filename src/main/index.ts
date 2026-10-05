@@ -5,7 +5,8 @@ import path from 'node:path';
 import { IPC, type BoardFile, type LayoutSettings, type RecentVaultView, type SemanticHit, type SemanticStatus, type ThemePref, type VaultInfo } from '../shared/types';
 import { startMcp, stopMcp, mcpStatus, newToken } from './mcp';
 import { type McpBackend } from './mcp-core';
-import { type MemoryPacks, type MemoryPolicy, emptyPacks, setPolicy } from '../shared/memory-packs';
+import { type MemoryPacks, type MemoryPolicy, applyPolicy, emptyPacks, policyFor, setPolicy } from '../shared/memory-packs';
+import { mergeCitations } from './citations';
 import * as memoryStore from './memory-store';
 import {
   createSnapshot,
@@ -41,25 +42,33 @@ let mcpStarted = false;
 
 const backendFactory = (): McpBackend => {
   const root = current?.path ?? '';
+  const packs = () => currentPacks();
+  const hidden = (rel: string) => policyFor(rel, packs()) === 'never';
   return {
-    search: (q, limit) =>
-      (index?.search(q, limit) ?? []).map((h) => ({
-        rel: h.rel,
-        title: h.title,
-        folder: h.folder,
-        snippet: h.snippet,
-        score: h.score,
-      })),
-    listNotes: () => index?.listNotes() ?? [],
-    readNote: async (rel) => (await ops.readNote(root, rel)).content,
+    // F: citations — keyword + semantic (if enabled) merged, memory packs applied, path/snippet/startLine per hit.
+    search: (q, limit) => {
+      const n = Math.min(50, Math.max(1, limit));
+      const kw = index?.search(q, n * 2) ?? [];
+      const sem = semanticIdx && q.trim() ? semanticIdx.search(q, n * 2, SEM_MIN) : [];
+      const vi = index instanceof VaultIndex ? index : null;
+      return mergeCitations(kw, sem, packs(), n, (rel) => vi?.noteContent(rel)).map((c) => ({ rel: c.path, ...c }));
+    },
+    listNotes: () => (index?.listNotes() ?? []).filter((x) => !hidden(x.rel)),
+    readNote: async (rel) => {
+      if (hidden(rel)) throw new Error('This note is excluded from AI access (memory pack: Never include)');
+      return (await ops.readNote(root, rel)).content;
+    },
     backlinks: (rel) =>
-      (index?.noteInfo(rel)?.backlinks ?? []).map((b) => ({
-        rel: b.rel,
-        title: b.title,
-        context: b.context || '',
-      })),
+      (index?.noteInfo(rel)?.backlinks ?? [])
+        .filter((b) => !hidden(b.rel))
+        .map((b) => ({
+          rel: b.rel,
+          title: b.title,
+          context: b.context || '',
+        })),
     appendNote: async (rel, text) => {
       if (!current || current.readOnly) throw new Error('Vault is read-only');
+      if (hidden(rel)) throw new Error('This note is excluded from AI access (memory pack: Never include)');
       const nf = await ops.readNote(root, rel);
       await ops.writeNote(root, rel, nf.content + '\n' + text);
     },
@@ -97,7 +106,7 @@ async function startIndex(): Promise<void> {
 }
 
 // ---------- B: semantic search (only built when settings.semanticSearch is on; zero cost otherwise) ----------
-const SEM_MIN = 0.05;
+const SEM_MIN = 0.08;
 function buildSemantic(): void {
   dropSemantic();
   if (!(index instanceof VaultIndex)) return;
@@ -190,6 +199,7 @@ async function openVault(p: string, isCopy?: boolean, opts: { mode?: 'notes' | '
   updateSettings({ recentVaults: recent.slice(0, 25), lastVaultPath: real });
   setTitle();
   startCount();
+  void memoryStore.loadPacks(current).catch(() => undefined); // warm cache for MCP/semantic policy
   void startIndex();
   return current;
 }
@@ -463,8 +473,8 @@ function registerIpc(): void {
     } else dropSemantic();
     return semanticStatus();
   });
-  ipcMain.handle(IPC.semanticSearch, (_e, q: string): SemanticHit[] => (semanticIdx && typeof q === 'string' && q.trim() ? semanticIdx.search(q, 20, SEM_MIN) : []));
-  ipcMain.handle(IPC.semanticRelated, (_e, rel: string): SemanticHit[] => (semanticIdx && typeof rel === 'string' ? semanticIdx.related(rel, 5, SEM_MIN) : []));
+  ipcMain.handle(IPC.semanticSearch, (_e, q: string): SemanticHit[] => (semanticIdx && typeof q === 'string' && q.trim() ? applyPolicy(semanticIdx.search(q, 20, SEM_MIN), currentPacks()) : []));
+  ipcMain.handle(IPC.semanticRelated, (_e, rel: string): SemanticHit[] => (semanticIdx && typeof rel === 'string' ? applyPolicy(semanticIdx.related(rel, 8, SEM_MIN), currentPacks()).slice(0, 5) : []));
   ipcMain.handle(IPC.getNoteInfo, (_e, rel: string) => index?.noteInfo(rel) ?? null);
   ipcMain.handle('index:links', () => index?.links() ?? []);
   ipcMain.handle(IPC.previews, (_e, rels: string[]) => index?.previews(rels) ?? {});
