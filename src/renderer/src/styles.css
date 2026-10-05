@@ -318,3 +318,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .navbtns { display: flex; gap: 1px; flex: none; margin-left: -4px; }
 .panehead .navbtns .iconbtn { width: 22px; height: 22px; border-radius: 5px; }
 .navbtns .iconbtn:disabled:hover { background: transparent; color: var(--muted); }
+
+/* Memory pack badges (Grok Bot) */
+.mpbadge { margin-left: 4px; font-size: 10px; color: var(--muted); }
+.mpbadge.always { color: #8b6cf6; }
