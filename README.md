@@ -14,6 +14,12 @@ A local-first Windows desktop app for knowledge management, built with Electron,
 - **Lines ↔ links**: a line from one note card to another appends `[[Target]]` under `## Connections` in the source note; deleting that line unlinks it but keeps the word (`[[Target]]` → `Target`). Board layout is saved in `.nexus/board.json` inside the vault.
 - **Code architecture mode (read-only)**: repos (package.json / pyproject / go.mod / Cargo.toml / .git+code, no `.obsidian`) open strictly read-only. Board = folder boxes + file cards with import lines; graph = files + imports (JS/TS import/require, Python import/from, Go imports, md links), external packages as ghosts, big repos collapse to folder nodes. Code opens in a read-only viewer with syntax colouring. Zips are extracted into the app data folder; board layout for repos is stored in app data, never in the repo.
 
+## Semantic search (optional, OFF by default)
+- Ctrl+K → click the **Semantic** chip → **Enable**. Results with similar meaning are added after keyword hits (tagged "similar").
+- When on, the note panel shows **Related notes** (top 5).
+- 100% local: hashing-trick embeddings computed in the app, kept in memory, no model download, no network.
+- Turn off again via the setting `semanticSearch: false` (settings.json in app data) — keyword search is unchanged either way.
+
 ## Privacy Statement
 
 Nexus Vault is **local-first** and **offline by design**:

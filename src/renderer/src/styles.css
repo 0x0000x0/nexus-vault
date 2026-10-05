@@ -169,6 +169,9 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .qi .qsn { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .qs mark { background: rgba(139,108,246,.35); color: inherit; border-radius: 2px; }
 .qfoot { font-size: 11px; color: var(--faint); padding: 6px 4px 0; }
+.qsrow { display: flex; gap: 8px; align-items: center; }
+.qsrow input { flex: 1; min-width: 0; }
+.qsask { font-size: 12px; color: var(--muted, var(--faint)); padding: 8px 4px 2px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 /* graph */
 .graphbg { cursor: grab; }

@@ -80,5 +80,6 @@ export function normalizeSettings(raw: unknown): Settings {
       graphNodeSize: clamp(l.graphNodeSize, 0.3, 3, DEFAULT_LAYOUT.graphNodeSize),
       graphLinkWidth: clamp(l.graphLinkWidth, 0.3, 3, DEFAULT_LAYOUT.graphLinkWidth),
     },
+    semanticSearch: r.semanticSearch === true,
   };
 }
