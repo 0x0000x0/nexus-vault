@@ -19,6 +19,7 @@ interface Props {
   onMenuOpen: () => void;
   onSearch: () => void;
   onOpenCode: () => void;
+  onSnapshots?: () => void;
 }
 
 export function TitleBar(p: Props) {
@@ -95,6 +96,12 @@ export function TitleBar(p: Props) {
               <span className="check" />
               Open GitHub repo / code project…
             </button>
+            {p.vault && p.onSnapshots && (
+              <button className="mi" onClick={act(p.onSnapshots)}>
+                <span className="check" />
+                Snapshots…
+              </button>
+            )}
             {p.vault && (
               <button className="mi" onClick={act(p.onClose)}>
                 <span className="check" />

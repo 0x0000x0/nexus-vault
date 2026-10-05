@@ -140,6 +140,10 @@ export const IPC = {
   evIndexChanged: 'ev:index-changed',
   evFsChanged: 'ev:fs-changed',
   evProgress: 'ev:progress',
+  snapList: 'snap:list',
+  snapCreate: 'snap:create',
+  snapRestore: 'snap:restore',
+  snapDelete: 'snap:delete',
 } as const;
 
 // ---------- M1: index / graph / notes ----------
@@ -226,4 +230,12 @@ export interface BoardData {
 export interface BoardFile {
   version: 1;
   boards: Record<string, BoardData>; // key = folder rel path ('' = vault root)
+}
+
+export interface SnapshotInfo {
+  id: string;
+  createdAt: number;
+  label: string;
+  fileCount: number;
+  bytes: number;
 }
