@@ -1,44 +1,30 @@
-import { contextBridge, ipcRenderer } from 'electron';
-import type { Settings, VaultInfo, DirEntry, SafeCopyResult, NoteCountProgress, LayoutSettings } from '../shared/index.js';
+// Minimal typed bridge exposed as window.nexus. Grok Bot.
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { IPC, type DirEntry, type LayoutSettings, type NoteCount, type RecentVaultView, type Settings, type ThemePref, type VaultInfo } from '../shared/types';
+
+function on<T>(channel: string, cb: (v: T) => void): () => void {
+  const h = (_e: IpcRendererEvent, v: T) => cb(v);
+  ipcRenderer.on(channel, h);
+  return () => ipcRenderer.removeListener(channel, h);
+}
 
 const api = {
-  ipc: {
-    invoke: <T extends keyof typeof import('../shared/ipc.js').Channels>(
-      channel: T,
-      payload: typeof import('../shared/ipc.js').Channels[T]['payload']
-    ): Promise<typeof import('../shared/ipc.js').Channels[T] extends { return: infer R } ? R : void> => {
-      return ipcRenderer.invoke(channel, payload);
-    },
-    on: (channel: string, callback: (...args: unknown[]) => void) => {
-      ipcRenderer.on(channel, (_e, ...args) => callback(...args));
-      return () => ipcRenderer.removeListener(channel, callback);
-    },
-  },
-  vault: {
-    open: (path: string, type: 'copy' | 'real') => api.ipc.invoke('renderer:open-vault', { path, type }),
-    close: () => api.ipc.invoke('renderer:close-vault'),
-    getRecent: () => api.ipc.invoke('renderer:get-recent-vaults'),
-    removeRecent: (path: string) => api.ipc.invoke('renderer:remove-recent-vault', path),
-    safeCopy: (sourcePath: string) => api.ipc.invoke('renderer:safe-copy-vault', { sourcePath }),
-    onOpened: (callback: (vault: VaultInfo) => void) => api.ipc.on('vault-opened', callback),
-    onClosed: (callback: () => void) => api.ipc.on('vault-closed', callback),
-  },
-  fs: {
-    listDir: (vaultRoot: string, relPath: string) => api.ipc.invoke('renderer:list-dir', { vaultRoot, relPath }),
-    readFile: (vaultRoot: string, relPath: string) => api.ipc.invoke('renderer:read-file', { vaultRoot, relPath }),
-  },
-  settings: {
-    get: () => api.ipc.invoke('renderer:get-settings'),
-    save: (settings: Partial<Settings>) => api.ipc.invoke('renderer:save-settings', settings),
-  },
-  theme: {
-    onChange: (callback: (theme: 'light' | 'dark') => void) => api.ipc.on('main:theme-changed', callback),
-  },
-  noteCount: {
-    onProgress: (callback: (progress: NoteCountProgress) => void) => api.ipc.on('main:note-count-progress', callback),
-  },
+  getSettings: (): Promise<Settings> => ipcRenderer.invoke(IPC.getSettings),
+  setTheme: (t: ThemePref): Promise<ThemePref> => ipcRenderer.invoke(IPC.setTheme, t),
+  setLayout: (l: Partial<LayoutSettings>): Promise<LayoutSettings> => ipcRenderer.invoke(IPC.setLayout, l),
+  getRecent: (): Promise<RecentVaultView[]> => ipcRenderer.invoke(IPC.getRecent),
+  removeRecent: (p: string): Promise<void> => ipcRenderer.invoke(IPC.removeRecent, p),
+  pickFolder: (title: string): Promise<string | null> => ipcRenderer.invoke(IPC.pickFolder, title),
+  confirmReal: (p: string): Promise<'real' | 'copy' | 'cancel'> => ipcRenderer.invoke(IPC.confirmReal, p),
+  openVault: (p: string): Promise<VaultInfo> => ipcRenderer.invoke(IPC.openVault, p),
+  safeCopy: (src: string): Promise<VaultInfo> => ipcRenderer.invoke(IPC.safeCopy, src),
+  closeVault: (): Promise<void> => ipcRenderer.invoke(IPC.closeVault),
+  getCurrent: (): Promise<VaultInfo | null> => ipcRenderer.invoke(IPC.getCurrent),
+  listDir: (root: string, rel: string): Promise<DirEntry[]> => ipcRenderer.invoke(IPC.listDir, root, rel),
+  onNoteCount: (cb: (n: NoteCount) => void) => on<NoteCount>(IPC.evNoteCount, cb),
+  onSystemTheme: (cb: (t: 'light' | 'dark') => void) => on<'light' | 'dark'>(IPC.evSystemTheme, cb),
+  platform: process.platform,
 };
 
 contextBridge.exposeInMainWorld('nexus', api);
-
-export type NexusAPI = typeof api;
+export type NexusApi = typeof api;

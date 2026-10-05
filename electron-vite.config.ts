@@ -1,48 +1,17 @@
 import { defineConfig } from 'electron-vite';
-import { resolve } from 'path';
+import { resolve } from 'node:path';
 
 export default defineConfig({
   main: {
-    build: {
-      outDir: 'out/main',
-      lib: {
-        entry: resolve(__dirname, 'src/main/index.ts'),
-        formats: ['cjs'],
-        fileName: 'index'
-      },
-      rollupOptions: {
-        external: ['electron', 'fs', 'path', 'crypto', 'os', 'url', 'util', 'events', 'stream', 'assert', 'constants', 'buffer']
-      }
-    }
+    build: { outDir: 'out/main', rollupOptions: { input: resolve(__dirname, 'src/main/index.ts') } },
   },
   preload: {
-    build: {
-      outDir: 'out/preload',
-      lib: {
-        entry: resolve(__dirname, 'src/preload/index.ts'),
-        formats: ['cjs'],
-        fileName: 'index'
-      },
-      rollupOptions: {
-        external: ['electron']
-      }
-    }
+    build: { outDir: 'out/preload', rollupOptions: { input: resolve(__dirname, 'src/preload/index.ts'), output: { format: 'cjs', entryFileNames: '[name].js' } } },
   },
   renderer: {
     root: 'src/renderer',
-    build: {
-      outDir: 'out/renderer',
-      rollupOptions: {
-        input: {
-          index: resolve(__dirname, 'src/renderer/index.html')
-        }
-      }
-    },
-    resolve: {
-      alias: {
-        '@renderer': resolve(__dirname, 'src/renderer'),
-        '@shared': resolve(__dirname, 'src/shared')
-      }
-    }
-  }
+    base: './',
+    esbuild: { jsx: 'automatic' },
+    build: { outDir: 'out/renderer', rollupOptions: { input: resolve(__dirname, 'src/renderer/index.html') } },
+  },
 });
