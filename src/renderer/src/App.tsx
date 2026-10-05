@@ -154,6 +154,12 @@ export function App() {
         onMenuOpen={() => void refreshRecent()}
       />
       <div className="body">
+        {!vault && banner && (
+          <div className={`banner${banner.err ? ' err' : ''}`} style={{ top: 52 }}>
+            <span>{banner.text}</span>
+            <button onClick={() => setBanner(null)} title="Dismiss">✕</button>
+          </div>
+        )}
         {!vault ? (
           <VaultPicker recent={recent} busy={busy} onOpenCopy={() => void openCopy()} onOpenReal={() => void openReal()} onOpenRecent={(p) => void openRecent(p)} onRemove={(p) => void removeRecent(p)} />
         ) : (
