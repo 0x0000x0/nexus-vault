@@ -58,6 +58,10 @@ const api: NexusApi = {
   onIndexChanged: (cb) => on<IndexStats>(IPC.evIndexChanged, cb),
   onFsChanged: (cb) => on<FsChange>(IPC.evFsChanged, cb),
   platform: process.platform,
+  snapList: inv(IPC.snapList),
+  snapCreate: inv(IPC.snapCreate),
+  snapRestore: inv(IPC.snapRestore),
+  snapDelete: inv(IPC.snapDelete),
 };
 
 contextBridge.exposeInMainWorld('nexus', api);

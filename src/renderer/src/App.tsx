@@ -11,6 +11,7 @@ import { QuickSearch } from './components/QuickSearch';
 import { RepoDrop } from './components/RepoDrop';
 import { StatusBar } from './components/StatusBar';
 import { TitleBar } from './components/TitleBar';
+import { Snapshots } from './components/Snapshots';
 import { ToolStrip } from './components/ToolStrip';
 import { VaultPicker } from './components/VaultPicker';
 import { Ctx, dirOf, errMsg, type AppActions } from './ctx';
@@ -45,6 +46,7 @@ export function App() {
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [quick, setQuick] = useState(false);
   const [repoDrop, setRepoDrop] = useState(false);
+  const [showSnapshots, setShowSnapshots] = useState(false);
   const [prog, setProg] = useState<ProgressInfo | null>(null);
   const [files, setFiles] = useState<Set<string>>(new Set());
   const [fileLinks, setFileLinks] = useState<[string, string][]>([]);
@@ -457,6 +459,7 @@ export function App() {
         onClose={() => void closeVault()}
         onMenuOpen={() => void refreshRecent()}
         onSearch={() => setQuick(true)}
+        onSnapshots={() => setShowSnapshots(true)}
         onOpenCode={() => setRepoDrop(true)}
       />
       <div className="body">
@@ -551,6 +554,7 @@ export function App() {
           </div>
         )}
       </div>
+      {showSnapshots && <Snapshots onClose={() => setShowSnapshots(false)} />}
       <StatusBar selected={selected} noteCount={countText} vault={vault} stats={stats} readOnly={vault?.readOnly} />
     </div>
   );

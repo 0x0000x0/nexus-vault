@@ -74,6 +74,11 @@ Cross-build from Linux works because:
 - `NEXUS_SCREENSHOT=<file.png>` — Capture page to file after load, then quit
 - `NEXUS_EXPAND=<comma,separated,relPaths>` — Pre-expand folders in tree
 
+
+## Snapshots
+
+Create point-in-time copies of all notes and the board (vault menu → **Snapshots…**). Restore brings files back and moves newer notes into `.trash/restore-<id>/`. Notes vaults store snapshots in `.nexus/snapshots/`; code projects only snapshot the board layout into app data.
+
 ## License
 
 Apache-2.0 — Copyright 2026 Jesse Lugo

@@ -1,5 +1,5 @@
 // Type of the window.nexus bridge (implemented in src/preload/index.ts). Grok Bot.
-import type { BoardFile, DirEntry, FsChange, ProgressInfo, GraphData, IndexStats, LayoutSettings, NoteCount, NoteFile, NoteInfo, RecentVaultView, SearchHit, Settings, ThemePref, VaultInfo } from './types';
+import type { BoardFile, DirEntry, FsChange, ProgressInfo, GraphData, IndexStats, LayoutSettings, NoteCount, NoteFile, NoteInfo, RecentVaultView, SearchHit, Settings, ThemePref, VaultInfo, SnapshotInfo } from './types';
 
 export interface NexusApi {
   getSettings(): Promise<Settings>;
@@ -51,4 +51,9 @@ export interface NexusApi {
   onIndexChanged(cb: (s: IndexStats) => void): () => void;
   onFsChanged(cb: (c: FsChange) => void): () => void;
   platform: string;
+
+  snapList(): Promise<SnapshotInfo[]>;
+  snapCreate(label?: string): Promise<SnapshotInfo>;
+  snapRestore(id: string): Promise<{ restored: number; trashed: number; preRestoreId: string }>;
+  snapDelete(id: string): Promise<void>;
 }
