@@ -32,7 +32,7 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
   const [showOrphans, setShowOrphans] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const prevNodes = useRef(new Map<string, N>());
-  const fitted = useRef(false);
+  const fitted = useRef('');
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -171,8 +171,10 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
           cooldownTicks={200}
           warmupTicks={30}
           onEngineStop={() => {
-            if (!fitted.current && data.nodes.length) {
-              fitted.current = true;
+            // Fit once per vault, and again when the graph size changes a lot (e.g. index finished late).
+            const key = `${app.vault.path}:${Math.round(Math.log2(data.nodes.length + 1))}`;
+            if (fitted.current !== key && data.nodes.length) {
+              fitted.current = key;
               fgRef.current?.zoomToFit(400, 30);
             }
           }}
