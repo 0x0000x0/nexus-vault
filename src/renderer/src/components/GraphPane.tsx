@@ -103,6 +103,13 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
     return () => clearTimeout(t);
   }, [focus]);
 
+  const [zoomK, setZoomK] = useState(1);
+  const zoomBy = (f: number) => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    fg.zoom(Math.min(12, Math.max(0.05, fg.zoom() * f)), 250);
+  };
+
   const hl = hover ? neighbors.get(hover) ?? new Set<string>() : null;
   const colors = dark
     ? { text: '#dcddde', link: 'rgba(160,160,160,0.28)', linkHl: '#8b6cf6', ghost: '#555', bg: '#1e1e1e' }
@@ -162,6 +169,12 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
             </div>
           )}
         </div>
+        <div className="zoombar" onPointerDown={(e) => e.stopPropagation()} data-testid="graph-zoombar">
+          <button onClick={() => zoomBy(1 / 1.3)} title="Zoom out (or scroll)" data-testid="graph-zoom-out">−</button>
+          <span data-testid="graph-zoom-pct">{Math.round(zoomK * 100)}%</span>
+          <button onClick={() => zoomBy(1.3)} title="Zoom in (or scroll)" data-testid="graph-zoom-in">+</button>
+          <button onClick={() => fgRef.current?.zoomToFit(400, 30)} title="Zoom to fit">⤢</button>
+        </div>
         {folders.length > 0 && (
           <div className="legend">
             {folders.slice(0, 8).map((f) => (
@@ -196,6 +209,9 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
           backgroundColor={colors.bg}
           nodeRelSize={4}
           cooldownTicks={200}
+          minZoom={0.05}
+          maxZoom={12}
+          onZoom={(t) => setZoomK(t.k)}
           warmupTicks={30}
           onEngineStop={() => {
             // Fit once per vault, and again when the graph size changes a lot (e.g. index finished late).
