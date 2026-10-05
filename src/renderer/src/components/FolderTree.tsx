@@ -1,6 +1,7 @@
 // Lazy, keyboard-navigable folder tree with Obsidian-style context menu and drag-to-board (Grok Bot).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DirEntry, FsChange, VaultInfo } from '../../../shared/types';
+import { type MemoryPacks, type MemoryPolicy, emptyPacks, explicitPolicy, policyFor } from '../../../shared/memory-packs';
 import { dirOf, errMsg, useApp } from '../ctx';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { CanvasIcon, CollapseIcon, FileIcon, FolderIcon, ImageIcon, NoteIcon, RefreshIcon } from './icons';
@@ -30,6 +31,7 @@ export function FolderTree({ vault, width, selected, openRel, onSelect, reveal }
   const [expanded, setExpanded] = useState<Set<string>>(() => expandedByVault.get(vault.path) ?? new Set());
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [packs, setPacks] = useState<MemoryPacks>(() => emptyPacks());
   const bodyRef = useRef<HTMLDivElement>(null);
   const childrenRef = useRef(children);
   childrenRef.current = children;
@@ -68,6 +70,16 @@ export function FolderTree({ vault, width, selected, openRel, onSelect, reveal }
   useEffect(() => {
     expandedByVault.set(vault.path, expanded);
   }, [vault.path, expanded]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.nexus.memoryGet().then((p) => {
+      if (!cancelled) setPacks(p);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [vault.path]);
 
   // Live updates from the file watcher: re-list only folders we already loaded.
   useEffect(
@@ -215,6 +227,30 @@ export function FolderTree({ vault, width, selected, openRel, onSelect, reveal }
 
   const revealLabel = window.nexus.platform === 'win32' ? 'Reveal in File Explorer' : window.nexus.platform === 'darwin' ? 'Reveal in Finder' : 'Show in system file manager';
 
+
+  const memoryMenuItems = (folder: string): MenuItem[] => {
+    const active = policyFor(folder, packs);
+    const set = (policy: MemoryPolicy | null) =>
+      void window.nexus.memorySet(folder, policy).then(setPacks);
+    // when picking when-relevant and parent already when-relevant → null (clear explicit)
+    const pickWhenRelevant = () => {
+      if (folder === '') {
+        set(null);
+        return;
+      }
+      const parent = folder.includes('/') ? folder.slice(0, folder.lastIndexOf('/')) : '';
+      const parentPol = policyFor(parent, packs);
+      set(parentPol === 'when-relevant' ? null : 'when-relevant');
+    };
+    const mark = (p: MemoryPolicy) => (active === p ? ' ✓' : '');
+    return [
+      { sep: true, label: '' },
+      { label: `AI memory: Always include${mark('always')}`, onClick: () => set('always') },
+      { label: `AI memory: When relevant${mark('when-relevant')}`, onClick: pickWhenRelevant },
+      { label: `AI memory: Never include${mark('never')}`, onClick: () => set('never') },
+    ];
+  };
+
   const openMenu = (ev: React.MouseEvent, e: DirEntry | null) => {
     ev.preventDefault();
     ev.stopPropagation();
@@ -227,6 +263,7 @@ export function FolderTree({ vault, width, selected, openRel, onSelect, reveal }
         { sep: true, label: '' },
         { label: 'Open vault root on board', onClick: () => app.openOnBoard('', 'folder') },
         { label: revealLabel, onClick: () => void reveal_('') },
+        ...memoryMenuItems(''),
       ];
     } else {
       onSelect(e.relPath, e);
@@ -247,6 +284,7 @@ export function FolderTree({ vault, width, selected, openRel, onSelect, reveal }
         { label: 'Copy path', onClick: () => void copyPath(e.relPath) },
         { sep: true, label: '' },
         { label: 'Delete…', hint: 'Del', danger: true, onClick: () => void del(e), disabled: ro },
+        ...(e.kind === 'folder' ? memoryMenuItems(e.relPath) : []),
       ];
     }
     setMenu({ x: ev.clientX, y: ev.clientY, items });
@@ -276,7 +314,9 @@ export function FolderTree({ vault, width, selected, openRel, onSelect, reveal }
       <div className="treebody" tabIndex={0} ref={bodyRef} onKeyDown={onKey} role="tree" onContextMenu={(ev) => openMenu(ev, null)}>
         {error && <div className="empty">Could not read folder: {error}</div>}
         {!error && children.has('') && rows.length === 0 && <div className="empty">This vault is empty. Right-click to add a note.</div>}
-        {rows.map(({ e, depth }) => (
+        {rows.map(({ e, depth }) => {
+          const exp = e.kind === 'folder' ? explicitPolicy(e.relPath, packs) : undefined;
+          return (
           <TreeRow
             key={e.relPath}
             e={e}
@@ -284,10 +324,12 @@ export function FolderTree({ vault, width, selected, openRel, onSelect, reveal }
             open={expanded.has(e.relPath)}
             selected={selected === e.relPath}
             active={openRel === e.relPath}
+            badge={exp === 'always' ? 'always' : exp === 'never' ? 'never' : undefined}
             onClick={() => activate(e)}
             onContextMenu={(ev) => openMenu(ev, e)}
           />
-        ))}
+          );
+        })}
         <div className="treepad" />
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
@@ -295,7 +337,7 @@ export function FolderTree({ vault, width, selected, openRel, onSelect, reveal }
   );
 }
 
-function TreeRow({ e, depth, open, selected, active, onClick, onContextMenu }: { e: DirEntry; depth: number; open: boolean; selected: boolean; active: boolean; onClick: () => void; onContextMenu: (ev: React.MouseEvent) => void }) {
+function TreeRow({ e, depth, open, selected, active, badge, onClick, onContextMenu }: { e: DirEntry; depth: number; open: boolean; selected: boolean; active: boolean; badge?: 'always' | 'never'; onClick: () => void; onContextMenu: (ev: React.MouseEvent) => void }) {
   const isMd = e.kind === 'file' && e.ext === 'md';
   const label = isMd ? e.name.slice(0, -3) : e.kind === 'file' && e.ext === 'canvas' ? e.name.slice(0, -7) : e.name;
   const icon = e.kind === 'folder' ? <FolderIcon /> : isMd ? <NoteIcon /> : e.ext === 'canvas' ? <CanvasIcon /> : IMAGE_EXT.has(e.ext) ? <ImageIcon /> : <FileIcon />;
@@ -320,6 +362,8 @@ function TreeRow({ e, depth, open, selected, active, onClick, onContextMenu }: {
       <span className="chev">{e.kind === 'folder' ? (open ? '▾' : '▸') : ''}</span>
       {icon}
       <span className="nm">{label}</span>
+      {badge === 'always' && <span className="mpbadge always" title="AI memory: always include">★</span>}
+      {badge === 'never' && <span className="mpbadge" title="AI memory: never include">⊘</span>}
       {e.kind === 'file' && !isMd && e.ext && <span className="ext">.{e.ext}</span>}
       {e.isFolderNote && <span className="fnote" title="Has folder note" />}
       {e.kind === 'folder' && e.childCount !== undefined && <span className="count">{e.childCount}</span>}

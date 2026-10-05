@@ -3,6 +3,8 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, sess
 import fs from 'node:fs';
 import path from 'node:path';
 import { IPC, type BoardFile, type LayoutSettings, type RecentVaultView, type ThemePref, type VaultInfo } from '../shared/types';
+import { type MemoryPacks, type MemoryPolicy, emptyPacks, setPolicy } from '../shared/memory-packs';
+import * as memoryStore from './memory-store';
 import { VaultIndex } from './indexer';
 import { CodeIndex } from './codeindex';
 import { detectRepo, extractZip } from './repo';
@@ -73,6 +75,11 @@ function progress(label: string, done: number, total: number): void {
 
 function reposRoot(): string {
   return path.join(app.getPath('userData'), 'repos');
+}
+
+/** Cached packs for the current vault (for MCP/semantic filtering). */
+export function currentPacks(): MemoryPacks {
+  return memoryStore.cachedPacks(current?.path);
 }
 
 /** Board layout for read-only repos lives in app data, keyed by repo path (never inside the repo). */
@@ -174,6 +181,15 @@ function registerIpc(): void {
     return current;
   });
   ipcMain.handle(IPC.listDir, (_e, root: string, rel: string) => listDir(requireVault(root), rel));
+  ipcMain.handle(IPC.memoryGet, async () => {
+    if (!current) return emptyPacks();
+    return memoryStore.loadPacks(current);
+  });
+  ipcMain.handle(IPC.memorySet, async (_e, folder: string, policy: MemoryPolicy | null) => {
+    if (!current) return emptyPacks();
+    const cur = await memoryStore.loadPacks(current);
+    return memoryStore.savePacks(current, setPolicy(cur, folder, policy));
+  });
 
   // ---- M1/M2: notes, file ops, index, board
   const v = () => {

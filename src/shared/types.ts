@@ -140,6 +140,8 @@ export const IPC = {
   evIndexChanged: 'ev:index-changed',
   evFsChanged: 'ev:fs-changed',
   evProgress: 'ev:progress',
+  memoryGet: 'memory:get',
+  memorySet: 'memory:set',
 } as const;
 
 // ---------- M1: index / graph / notes ----------
@@ -227,3 +229,6 @@ export interface BoardFile {
   version: 1;
   boards: Record<string, BoardData>; // key = folder rel path ('' = vault root)
 }
+
+// Re-export memory packs types (canonical defs in memory-packs.ts)
+export type { MemoryPolicy, MemoryPacks } from './memory-packs';
