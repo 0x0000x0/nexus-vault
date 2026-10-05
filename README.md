@@ -1,6 +1,8 @@
 # Nexus Vault
 
-A local-first, Obsidian-compatible notes app with a board (canvas) and graph view, built with Electron, TypeScript, and React. Primary target is Windows; Linux builds work for development.
+**Nexus Vault** — local notes with an Obsidian-style graph, a Milanote-style board, and IcePanel-style nested boxes. Your files stay on your PC. Optional AI access stays on localhost.
+
+Built with Electron, TypeScript, and React. Works with existing Obsidian vaults (plain Markdown folders). Primary target is Windows; Linux builds work for development.
 
 > Status: early (0.0.x). Prebuilt Windows binaries are not published yet — build from source (see below).
 
