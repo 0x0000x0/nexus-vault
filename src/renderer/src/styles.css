@@ -325,3 +325,15 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 /* Memory pack badges (Grok Bot) */
 .mpbadge { margin-left: 4px; font-size: 10px; color: var(--muted); }
 .mpbadge.always { color: #8b6cf6; }
+
+/* F: Sources panel (Grok Bot) */
+.sources { position: absolute; left: 10px; bottom: 10px; z-index: 30; width: 320px; max-width: calc(100% - 20px); max-height: 46%; display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow2); font-size: 12px; }
+.sources .srchead { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+.sources .srchead .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sources .srchead .r { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.sources .srclist { list-style: decimal; margin: 0; padding: 4px 8px 6px 28px; overflow: auto; }
+.sources .srclist li { padding: 5px 6px; border-radius: 6px; cursor: pointer; }
+.sources .srclist li:hover, .sources .srclist li.on { background: rgba(139,108,246,.12); }
+.sources .srct { font-weight: 600; }
+.sources .srcp { color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sources .srcs { color: var(--muted, var(--faint)); margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

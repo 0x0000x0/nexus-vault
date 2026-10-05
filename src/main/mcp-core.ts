@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 export interface McpBackend {
-  search(q: string, limit: number): { rel: string; title: string; folder: string; snippet: string; score: number }[];
+  search(q: string, limit: number): { rel: string; title: string; folder: string; snippet: string; score: number; startLine?: number; source?: string }[];
   listNotes(): { rel: string; title: string }[];
   readNote(rel: string): Promise<string>;
   backlinks(rel: string): { rel: string; title: string; context: string }[];
@@ -63,7 +63,11 @@ export function newToken(): string {
 function makeToolResult(hits: any[]): any {
   const items: any[] = [];
   for (const h of hits) {
-    items.push({ type: 'text', text: JSON.stringify({ path: h.rel, title: h.title, folder: h.folder, snippet: h.snippet, score: h.score }) });
+    const cite = `[${h.title}](${encodeURI(h.rel)}${h.startLine ? `#L${h.startLine}` : ''})`;
+    items.push({
+      type: 'text',
+      text: JSON.stringify({ path: h.rel, title: h.title, folder: h.folder, snippet: h.snippet, score: h.score, ...(h.startLine ? { startLine: h.startLine } : {}), ...(h.source ? { source: h.source } : {}), cite }),
+    });
   }
   return items;
 }
@@ -105,7 +109,7 @@ export async function handleRpc(
           tools: [
             {
               name: 'search',
-              description: 'Search notes',
+              description: 'Search notes (keyword + local semantic if enabled). Each hit is a source with path, title, snippet, startLine and a ready-made markdown `cite` link — cite sources in answers.',
               inputSchema: {
                 type: 'object',
                 properties: {
@@ -141,7 +145,7 @@ export async function handleRpc(
         tools: [
           {
             name: 'search',
-            description: 'Search notes',
+            description: 'Search notes (keyword + local semantic if enabled). Each hit is a source with path, title, snippet, startLine and a ready-made markdown `cite` link — cite sources in answers.',
             inputSchema: {
               type: 'object',
               properties: {

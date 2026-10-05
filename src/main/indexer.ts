@@ -275,6 +275,10 @@ export class VaultIndex {
     return [...this.notes.values()].map((n) => ({ rel: n.rel, title: n.title }));
   }
 
+  noteContent(rel: string): string | undefined {
+    return this.notes.get(rel)?.content;
+  }
+
   allNotes(): { rel: string; title: string; content: string }[] {
     return [...this.notes.values()].map((n) => ({ rel: n.rel, title: n.title, content: n.content }));
   }
