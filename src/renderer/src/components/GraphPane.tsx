@@ -5,6 +5,7 @@ import type { GraphNode, ViewMode } from '../../../shared/types';
 import { folderColor, useApp } from '../ctx';
 import { GraphIcon } from './icons';
 import { MaxBtn } from './Panes';
+import { NavButtons } from './NavButtons';
 
 type N = NodeObject<GraphNode & { x?: number; y?: number }>;
 interface L {
@@ -21,11 +22,15 @@ interface Props {
   nodeSize: number;
   linkWidth: number;
   onSizes: (p: { graphNodeSize?: number; graphLinkWidth?: number }, persist?: boolean) => void;
+  /** Reports the graph camera (center in graph coords + zoom) after each zoom/pan settles. */
+  onCam?: (cam: { x: number; y: number; k: number }) => void;
+  /** Back/Forward restore request: jump to this camera once. */
+  restoreCam?: { cam: { x: number; y: number; k: number }; n: number } | null;
 }
 
 const idOf = (v: string | N) => (typeof v === 'string' ? v : (v.id as string));
 
-export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWidth, onSizes }: Props) {
+export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWidth, onSizes, onCam, restoreCam }: Props) {
   const [showSettings, setShowSettings] = useState(false);
   const app = useApp();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -103,6 +108,24 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
     return () => clearTimeout(t);
   }, [focus]);
 
+  // Back/Forward history: jump to a stored camera (no animation) and stop the first-fit from overriding it.
+  const restoredN = useRef(0);
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!restoreCam || restoreCam.n === restoredN.current || !fg) return;
+    restoredN.current = restoreCam.n;
+    fitted.current = `${app.vault.path}:${Math.round(Math.log2(data.nodes.length + 1))}`;
+    fg.centerAt(restoreCam.cam.x, restoreCam.cam.y, 0);
+    fg.zoom(restoreCam.cam.k, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoreCam]);
+  const reportCam = () => {
+    const fg = fgRef.current;
+    if (!fg || !onCam) return;
+    const c = fg.centerAt();
+    if (c && Number.isFinite(c.x) && Number.isFinite(c.y)) onCam({ x: c.x, y: c.y, k: fg.zoom() });
+  };
+
   const [zoomK, setZoomK] = useState(1);
   const zoomBy = (f: number) => {
     const fg = fgRef.current;
@@ -128,6 +151,7 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
   return (
     <section className="pane" style={{ flex: 1 }} data-pane="graph">
       <div className="panehead">
+        <NavButtons pane="graph" />
         <GraphIcon size={13} />
         <b>Graph</b> <span className="hcount">{app.graph.nodes.filter((n) => !n.ghost).length} {app.readOnly ? (app.graph.nodes.some((n) => n.id.startsWith('dir:')) ? 'folders (collapsed)' : 'files') : 'notes'} · {app.graph.links.length} {app.readOnly ? 'imports' : 'links'}</span>
         <div className="r">
@@ -212,6 +236,7 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
           minZoom={0.05}
           maxZoom={12}
           onZoom={(t) => setZoomK(t.k)}
+          onZoomEnd={reportCam}
           warmupTicks={30}
           onEngineStop={() => {
             // Fit once per vault, and again when the graph size changes a lot (e.g. index finished late).

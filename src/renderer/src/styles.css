@@ -313,3 +313,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .gsettings input[type=range] { accent-color: var(--accent); width: 100%; }
 .gsettings b { font-weight: 500; color: var(--muted); text-align: right; }
 .gsettings .linkbtn { align-self: flex-end; }
+
+/* Back/Forward history arrows (Grok Bot) */
+.navbtns { display: flex; gap: 1px; flex: none; margin-left: -4px; }
+.panehead .navbtns .iconbtn { width: 22px; height: 22px; border-radius: 5px; }
+.navbtns .iconbtn:disabled:hover { background: transparent; color: var(--muted); }

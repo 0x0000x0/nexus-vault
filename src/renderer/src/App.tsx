@@ -14,6 +14,7 @@ import { TitleBar } from './components/TitleBar';
 import { ToolStrip } from './components/ToolStrip';
 import { VaultPicker } from './components/VaultPicker';
 import { Ctx, dirOf, errMsg, type AppActions } from './ctx';
+import { back as navBack, canBack, canForward, createNav, forward as navForward, push as navPush, replace as navReplace, type Cam, type NavSnap, type NavState } from './nav-history';
 
 const nexus = window.nexus;
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -53,6 +54,46 @@ export function App() {
   const counter = useRef(0);
   const next = () => ++counter.current;
 
+  // ---- Back/Forward view history (Board + Graph). k === 0 means "camera not known yet".
+  const navRef = useRef<NavState>(createNav());
+  const [navTick, setNavTick] = useState(0);
+  const boardCams = useRef(new Map<string, Cam>());
+  const graphCam = useRef<Cam>({ x: 0, y: 0, k: 0 });
+  const [boardRestore, setBoardRestore] = useState<{ folder: string; view: Cam; n: number } | null>(null);
+  const [graphRestore, setGraphRestore] = useState<{ cam: Cam; n: number } | null>(null);
+  const skipRecord = useRef(false);
+  const camTimer = useRef<number | null>(null);
+  const setNav = (s: NavState) => {
+    if (s === navRef.current) return;
+    navRef.current = s;
+    (window as unknown as { __nav?: NavState }).__nav = s; // test harness hook
+    setNavTick((t) => t + 1);
+  };
+  /** Current entry with the latest known cameras folded in. */
+  const withCams = (snap: NavSnap): NavSnap => ({
+    ...snap,
+    boardView: boardCams.current.get(snap.boardFolder) ?? snap.boardView,
+    graphCam: graphCam.current.k > 0 ? { ...graphCam.current } : snap.graphCam,
+  });
+  const freezeCurrent = (nav: NavState): NavState => {
+    const cur = nav.stack[nav.index];
+    return cur ? navReplace(nav, withCams(cur)) : nav;
+  };
+  const camSettled = () => {
+    if (camTimer.current) window.clearTimeout(camTimer.current);
+    camTimer.current = window.setTimeout(() => setNav(freezeCurrent(navRef.current)), 350);
+  };
+  const onBoardCam = useCallback((folder: string, cam: Cam) => {
+    boardCams.current.set(folder, { x: cam.x, y: cam.y, k: cam.k });
+    camSettled();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const onGraphCam = useCallback((cam: Cam) => {
+    graphCam.current = cam;
+    camSettled();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ---- startup
   useEffect(() => {
     void (async () => {
@@ -89,7 +130,14 @@ export function App() {
     setStats(null);
     setOpenRel(null);
     setBoardFolder('');
+    navRef.current = createNav();
+    boardCams.current.clear();
+    graphCam.current = { x: 0, y: 0, k: 0 };
+    setNavTick((t) => t + 1);
     if (!vault) return;
+    // Seed the first history entry (vault root, no note); the record effect below skips this commit's stale state.
+    skipRecord.current = true;
+    navRef.current = navPush(navRef.current, { boardFolder: '', boardView: { x: 0, y: 0, k: 0 }, graphCam: { x: 0, y: 0, k: 0 }, selected: null, openRel: null, notePanelOpen: layoutRef.current.notePanelOpen });
     setFiles(new Set());
     setFileLinks([]);
     void nexus.listNotes().then((r) => {
@@ -127,6 +175,58 @@ export function App() {
     bannerTimer.current = window.setTimeout(() => setBanner(null), err ? 9000 : 4500);
   }, []);
 
+  // Record history: folder drill / opening a note / "show in graph|board" push a new entry;
+  // selection and note panel open/close only update the current entry (cameras are never reset).
+  const lastFocus = useRef({ g: 0, b: 0 });
+  useEffect(() => {
+    if (skipRecord.current) {
+      skipRecord.current = false;
+      lastFocus.current = { g: graphFocus?.n ?? 0, b: boardFocus?.n ?? 0 };
+      return;
+    }
+    if (!vault) return;
+    const nav = navRef.current;
+    const cur = nav.stack[nav.index];
+    const focusMoved = (graphFocus?.n ?? 0) !== lastFocus.current.g || (boardFocus?.n ?? 0) !== lastFocus.current.b;
+    lastFocus.current = { g: graphFocus?.n ?? 0, b: boardFocus?.n ?? 0 };
+    const snap = withCams({ boardFolder, boardView: { x: 0, y: 0, k: 0 }, graphCam: { x: 0, y: 0, k: 0 }, selected, openRel, notePanelOpen: layout.notePanelOpen });
+    if (!cur) return setNav(navPush(nav, snap));
+    const navigated = cur.boardFolder !== boardFolder || (openRel !== null && cur.openRel !== openRel) || focusMoved;
+    if (navigated) setNav(navPush(freezeCurrent(nav), snap));
+    else setNav(navReplace(nav, { ...withCams(cur), selected, openRel, notePanelOpen: layout.notePanelOpen }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vault?.path, boardFolder, selected, openRel, layout.notePanelOpen, graphFocus?.n, boardFocus?.n]);
+
+  const applySnap = (s: NavSnap) => {
+    setBoardFolder(s.boardFolder);
+    setSelected(s.selected);
+    setOpenRel(s.openRel);
+    if (s.openRel) setTreeReveal({ rel: s.openRel, n: next() });
+    if (s.notePanelOpen !== layoutRef.current.notePanelOpen) setLayout({ notePanelOpen: s.notePanelOpen });
+    if (s.boardView.k > 0) {
+      boardCams.current.set(s.boardFolder, s.boardView);
+      setBoardRestore({ folder: s.boardFolder, view: s.boardView, n: next() });
+    }
+    if (s.graphCam.k > 0) {
+      graphCam.current = s.graphCam;
+      setGraphRestore({ cam: s.graphCam, n: next() });
+    }
+  };
+  const goBack = () => {
+    const r = navBack(freezeCurrent(navRef.current));
+    if (!r) return;
+    setNav(r.state);
+    applySnap(r.snap);
+  };
+  const goForward = () => {
+    const r = navForward(freezeCurrent(navRef.current));
+    if (!r) return;
+    setNav(r.state);
+    applySnap(r.snap);
+  };
+  const goRef = useRef({ goBack, goForward });
+  goRef.current = { goBack, goForward };
+
   // ---- global keys
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -134,9 +234,28 @@ export function App() {
         e.preventDefault();
         setQuick((q) => !q);
       }
+      // Alt+Left / Alt+Right: Back / Forward (not while typing in a field).
+      if (vault && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        const t = e.target as HTMLElement | null;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+        e.preventDefault();
+        if (e.key === 'ArrowLeft') goRef.current.goBack();
+        else goRef.current.goForward();
+      }
+    };
+    // Mouse side buttons (X1 = back, X2 = forward).
+    const m = (e: MouseEvent) => {
+      if (!vault || (e.button !== 3 && e.button !== 4)) return;
+      e.preventDefault();
+      if (e.button === 3) goRef.current.goBack();
+      else goRef.current.goForward();
     };
     window.addEventListener('keydown', k);
-    return () => window.removeEventListener('keydown', k);
+    window.addEventListener('mouseup', m);
+    return () => {
+      window.removeEventListener('keydown', k);
+      window.removeEventListener('mouseup', m);
+    };
   }, [vault]);
 
   // ---- vault actions
@@ -270,9 +389,15 @@ export function App() {
         setBoardFolder((f) => (f === rel || f.startsWith(rel + '/') ? dirOf(rel) : f));
         setSelected(null);
       },
+      nav: {
+        canBack: canBack(navRef.current),
+        canForward: canForward(navRef.current),
+        back: () => goRef.current.goBack(),
+        forward: () => goRef.current.goForward(),
+      },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vault, graph, stats?.version, files, fileLinks, ask, notify]);
+  }, [vault, graph, stats?.version, files, fileLinks, ask, notify, navTick]);
 
   if (!ready) return <div className="app" />;
 
@@ -294,9 +419,11 @@ export function App() {
       focus={boardFocus}
       selectedRel={selected}
       readOnly={vault?.readOnly}
+      onCam={onBoardCam}
+      restoreView={boardRestore}
     />
   );
-  const graphPane = <GraphPane view={layout.view} onMax={maxToggle('graph')} dark={resolved === 'dark'} selected={selected} focus={graphFocus} nodeSize={layout.graphNodeSize} linkWidth={layout.graphLinkWidth} onSizes={(p, persist) => setLayout(p, persist)} />;
+  const graphPane = <GraphPane view={layout.view} onMax={maxToggle('graph')} dark={resolved === 'dark'} selected={selected} focus={graphFocus} nodeSize={layout.graphNodeSize} linkWidth={layout.graphLinkWidth} onSizes={(p, persist) => setLayout(p, persist)} onCam={onGraphCam} restoreCam={graphRestore} />;
   const [left, right] = layout.paneOrder === 'board-graph' ? [board, graphPane] : [graphPane, board];
 
   const mainWidth = () => mainRef.current?.clientWidth ?? 1000;

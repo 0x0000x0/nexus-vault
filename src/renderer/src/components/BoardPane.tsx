@@ -1,6 +1,7 @@
 // Milanote + IcePanel style board: note/folder/text/group/image/link cards, lines, drill-down (Grok Bot).
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BoardData, BoardEdge, BoardFile, BoardNode, BoardNodeType, DirEntry, FsChange, ViewMode } from '../../../shared/types';
+import { NavButtons } from './NavButtons';
 import { baseName, dirOf, errMsg, folderColor, noteTitle, useApp } from '../ctx';
 import { bbox, CARD, clipToRect, freeSlot, inside, normalizeBoard, normalizeUrl, uid } from './board-utils';
 import { ContextMenu, type MenuItem } from './ContextMenu';
@@ -23,6 +24,10 @@ interface Props {
   focus: { rel: string; n: number } | null;
   selectedRel: string | null;
   readOnly?: boolean; // code mode: never write into the folder (board layout still saved elsewhere by main)
+  /** Reports the camera of the current folder board (for Back/Forward history). */
+  onCam?: (folder: string, cam: { x: number; y: number; k: number }) => void;
+  /** Back/Forward restore request: apply this camera once the folder's board is loaded. */
+  restoreView?: { folder: string; view: { x: number; y: number; k: number }; n: number } | null;
 }
 
 type Drag =
@@ -349,8 +354,19 @@ export function BoardPane(p: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.focus, file, entries, folder]);
 
-  // First visit of a board: fit to content.
   const fittedFor = useRef<string | null>(null);
+  // Back/Forward: apply a restore request once (after the folder's board is loaded); suppresses first-visit auto-fit.
+  const restoredN = useRef(0);
+  useEffect(() => {
+    const r = p.restoreView;
+    if (!r || r.n === restoredN.current || r.folder !== folder || !file || !entries || entries.folder !== folder) return;
+    restoredN.current = r.n;
+    fittedFor.current = folder;
+    const v = viewRef.current;
+    if (v.x !== r.view.x || v.y !== r.view.y || v.k !== r.view.k) setView(r.view);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.restoreView, file === null, entries, folder]);
+  // First visit of a board: fit to content.
   useEffect(() => {
     if (!file || fittedFor.current === folder || !entries || entries.folder !== folder) return;
     if (board.view) {
@@ -362,6 +378,14 @@ export function BoardPane(p: Props) {
       setTimeout(fit, 30);
     }
   }, [file, folder, entries, board.nodes.length, board.view, fit]);
+
+  // ---------- Back/Forward history ----------
+  // Report camera changes (App debounces and stores them in the current history entry).
+  useEffect(() => {
+    if (!file || !entries || entries.folder !== folder) return;
+    p.onCam?.(folder, view);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file === null, entries, folder, view.x, view.y, view.k]);
 
   // ---------- deleting ----------
   const deleteSelection = async () => {
@@ -911,6 +935,7 @@ export function BoardPane(p: Props) {
   return (
     <section className="pane" style={{ flex: 1 }} data-pane="board">
       <div className="panehead">
+        <NavButtons pane="board" />
         <BoardIcon size={13} />
         <b>Board</b>
         <nav className="crumbs">
