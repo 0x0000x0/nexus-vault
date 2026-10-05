@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { ipcMain, dialog } from 'electron';
 import { Channels } from '../../shared/ipc.js';
 import * as vaultHandlers from './vault.js';
 import * as fsHandlers from './fs.js';
@@ -21,7 +21,7 @@ export function registerIpcHandlers(): void {
     return settingsHandlers.removeRecentVault(path);
   });
 
-  ipcMain.handle('renderer:safe-copy-vault', async (_e, payload, _event) => {
+  ipcMain.handle('renderer:safe-copy-vault', async (_e, payload) => {
     return vaultHandlers.safeCopyVault(payload.sourcePath);
   });
 
@@ -39,5 +39,27 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('renderer:save-settings', async (_e, payload) => {
     return settingsHandlers.saveSettings(payload);
+  });
+
+  ipcMain.handle('renderer:open-folder-dialog', async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    return result.canceled ? null : { path: result.filePaths[0] };
+  });
+
+  ipcMain.handle('renderer:confirm-dialog', async (_e, payload: { title: string; message: string; buttons: string[] }) => {
+    const result = await dialog.showMessageBox({
+      type: 'question',
+      title: payload.title,
+      message: payload.message,
+      buttons: payload.buttons,
+      defaultId: 0,
+      cancelId: payload.buttons.length - 1,
+    });
+    return result.response;
+  });
+
+  ipcMain.handle('renderer:open-settings', async () => {
+    // Placeholder for settings window
+    return null;
   });
 }
