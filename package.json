@@ -1,0 +1,31 @@
+{
+  "name": "nexus-vault",
+  "version": "0.0.1",
+  "description": "Nexus Vault - Local-first knowledge management",
+  "author": "Jesse Lugo",
+  "license": "Apache-2.0",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dist:win": "electron-builder --win nsis portable --x64",
+    "dist:linux": "electron-builder --linux dir"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.5.0",
+    "vite": "^7.0.0",
+    "vitest": "^3.0.0"
+  }
+}

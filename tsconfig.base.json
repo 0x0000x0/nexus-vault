@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@main/*": ["src/main/*"],
+      "@preload/*": ["src/preload/*"],
+      "@renderer/*": ["src/renderer/*"],
+      "@shared/*": ["src/shared/*"]
+    }
+  },
+  "exclude": ["node_modules", "out", "dist", "release", "test"]
+}

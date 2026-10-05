@@ -1,0 +1,38 @@
+appId: com.nexusvault.app
+productName: Nexus Vault
+copyright: "Copyright 2026 Jesse Lugo"
+directories:
+  output: dist
+  buildResources: build
+files:
+  - from: out/main
+    to: .
+  - from: out/preload
+    to: .
+  - from: out/renderer
+    to: .
+  - package.json
+  - "!**/*.map"
+extraResources:
+  - from: resources/icon.png
+    to: icon.png
+    filter: ["**/*"]
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  signAndEditExecutable: false
+  icon: resources/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallPath: true
+  createDesktopShortcut: true
+  artifactName: "Nexus-Vault-Setup-${version}.${ext}"
+portable:
+  artifactName: "Nexus-Vault-Portable-${version}.${ext}"
+linux:
+  target: dir
+  artifactName: "Nexus-Vault-${version}.${ext}"
