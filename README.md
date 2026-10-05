@@ -2,29 +2,27 @@
 
 A local-first Windows desktop app for knowledge management, built with Electron, TypeScript, and React.
 
-## What M0 Does
+## What 0.0.2 does (M0 + M1 + M2 + code mode)
 
-- **Vault picker**: Open a safe copy of a vault (recommended) or open a folder as a vault directly
-- **Recent vaults**: List with "copy" badge, last opened time, and "not found" indication
-- **Folder tree**: Lazy-loaded, keyboard-navigable, folder-note awareness, collapsible
-- **Themes**: Light / Dark / System with live switching and persistence
-- **Layout shell**: Resizable panels (tree, tool strip, graph/board panes), persisted layout
-- **View modes**: Graph only / Side-by-side (Board left, Graph right) / Board only
-- **Tool strip**: 9 disabled placeholder tools with tooltips (coming in M2)
-- **Status bar**: Local-only indicator, read-only (M0), note count, app version
-- **Security**: Context isolation, sandbox, CSP, blocked navigation, no network calls
-- **Read-only guarantee**: Never writes to vault folders in M0
+- **Vault picker / switcher**: safe copy (recommended), open real folder, recent vaults, and **Open GitHub repo / code project** (drop a folder or `.zip`).
+- **Folder tree**: lazy, keyboard-navigable; Obsidian-style **right-click menu** (New note, New folder, Rename, Duplicate, Delete → vault `.trash`, Reveal in File Explorer, Copy path, Open on board, Show in graph); drag notes onto the board; live-updates from a file watcher.
+- **Graph (M1)**: force-directed graph of notes from `[[wikilinks]]` and Markdown links (d3-force via react-force-graph-2d, bundled). Click opens a note, drag/zoom/pan, hover highlights neighbours, folder colours + legend, unresolved links as ghost nodes, toggles for labels/ghosts/orphans, zoom-to-fit.
+- **Index (M1)**: in-memory index of links, tags, headings + MiniSearch full-text, kept fresh by chokidar (pure JS, no native modules).
+- **Ctrl+K** quick search across titles and content.
+- **Note panel**: Markdown preview (clickable `[[links]]`) and editor; Ctrl+S saves; every write backs up the previous version into `.nexus-backups/`; conflict detection if the file changed on disk; backlinks with context, outgoing links, tags.
+- **Board (M2)**: Milanote/IcePanel-style board per folder, auto-populated with the folder's notes (cards) and subfolders (boxes you double-click to drill into; breadcrumb back). Tool strip works by click (adds at centre) or drag-and-drop: Note (creates a real `.md`), Text/sticky, Box/group, Image, Link card, Line tool. Move, resize, Shift-select / marquee, Delete key, zoom/pan, card colours, labelled lines.
+- **Lines ↔ links**: a line from one note card to another appends `[[Target]]` under `## Connections` in the source note; deleting that line unlinks it but keeps the word (`[[Target]]` → `Target`). Board layout is saved in `.nexus/board.json` inside the vault.
+- **Code architecture mode (read-only)**: repos (package.json / pyproject / go.mod / Cargo.toml / .git+code, no `.obsidian`) open strictly read-only. Board = folder boxes + file cards with import lines; graph = files + imports (JS/TS import/require, Python import/from, Go imports, md links), external packages as ghosts, big repos collapse to folder nodes. Code opens in a read-only viewer with syntax colouring. Zips are extracted into the app data folder; board layout for repos is stored in app data, never in the repo.
 
 ## Privacy Statement
 
 Nexus Vault is **local-first** and **offline by design**:
 
-- No network requests of any kind
-- No telemetry, analytics, or crash reporting
-- No auto-update checks
-- No accounts or cloud sync
-- All data stays in your chosen vault folder on your computer
-- The only writes are: app settings in `userData` and safe-copy creation in Documents
+- No network requests of any kind (the main process blocks everything except local files)
+- No telemetry, analytics, or crash reporting; no auto-update; no accounts
+- Writes inside a vault: the notes you edit/create/rename/delete, backups in `.nexus-backups/`, deleted items in `.trash/`, board layout in `.nexus/board.json`
+- Code repos are never written to
+- Link cards open in your system browser only when you double-click and confirm
 
 ## Development
 
