@@ -152,6 +152,13 @@ export class VaultIndex {
     this.onChange(this.stats(), fsChange);
   }
 
+  /** All resolved file->file links (never collapsed). */
+  links(): [string, string][] {
+    const out: [string, string][] = [];
+    for (const [s, m] of this.out) for (const t of m.keys()) out.push([s, t]);
+    return out;
+  }
+
   stats(): IndexStats {
     let links = 0;
     for (const s of this.out.values()) links += s.size;

@@ -1,5 +1,5 @@
 // Type of the window.nexus bridge (implemented in src/preload/index.ts). Grok Bot.
-import type { BoardFile, DirEntry, FsChange, GraphData, IndexStats, LayoutSettings, NoteCount, NoteFile, NoteInfo, RecentVaultView, SearchHit, Settings, ThemePref, VaultInfo } from './types';
+import type { BoardFile, DirEntry, FsChange, ProgressInfo, GraphData, IndexStats, LayoutSettings, NoteCount, NoteFile, NoteInfo, RecentVaultView, SearchHit, Settings, ThemePref, VaultInfo } from './types';
 
 export interface NexusApi {
   getSettings(): Promise<Settings>;
@@ -28,6 +28,7 @@ export interface NexusApi {
   getGraph(): Promise<GraphData>;
   search(q: string): Promise<SearchHit[]>;
   getNoteInfo(rel: string): Promise<NoteInfo | null>;
+  fileLinks(): Promise<[string, string][]>;
   previews(rels: string[]): Promise<Record<string, { preview: string; tags: string[] }>>;
   listNotes(): Promise<{ notes: { rel: string; title: string }[]; stats: IndexStats | null; ready: boolean }>;
   // board
@@ -36,6 +37,12 @@ export interface NexusApi {
   pickImage(): Promise<string | null>;
   readImage(rel: string): Promise<string>;
   openExternal(url: string): Promise<void>;
+  /** Open a code repo folder or .zip (extracted into app data) in read-only code architecture mode. */
+  openCode(pathOrZip: string): Promise<VaultInfo>;
+  pickRepo(kind: 'folder' | 'zip'): Promise<string | null>;
+  /** Real filesystem path of a dropped File (Electron webUtils). */
+  pathForFile(f: File): string;
+  onProgress(cb: (p: ProgressInfo) => void): () => void;
   addConnection(src: string, target: string, label?: string): Promise<boolean>;
   removeConnection(src: string, target: string): Promise<boolean>;
   // events

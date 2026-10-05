@@ -4,6 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { IPC, type BoardFile, type LayoutSettings, type RecentVaultView, type ThemePref, type VaultInfo } from '../shared/types';
 import { VaultIndex } from './indexer';
+import { CodeIndex } from './codeindex';
+import { detectRepo, extractZip } from './repo';
+import crypto from 'node:crypto';
 import * as ops from './fileops';
 import { addConnectionText, hasLinkTo, linkNameFor, removeLinkText } from './parse';
 import { resolveInVault } from './vault';
@@ -17,17 +20,23 @@ const isDev = !app.isPackaged && !!process.env.ELECTRON_RENDERER_URL;
 let win: BrowserWindow | null = null;
 let current: VaultInfo | null = null;
 let countToken = 0;
-let index: VaultIndex | null = null;
+let index: VaultIndex | CodeIndex | null = null;
 
 async function startIndex(): Promise<void> {
   await index?.close();
   index = null;
   if (!current) return;
-  const idx = new VaultIndex(current.path, (stats, fsChange) => {
+  const onChange = (stats: import('../shared/types').IndexStats, fsChange: import('../shared/types').FsChange) => {
     if (index !== idx) return;
     win?.webContents.send(IPC.evIndexChanged, stats);
     if (fsChange.dirs.length || fsChange.files.length) win?.webContents.send(IPC.evFsChanged, fsChange);
-  });
+  };
+  const idx: VaultIndex | CodeIndex =
+    current.mode === 'code'
+      ? new CodeIndex(current.path, onChange, (label, done, total) => {
+          if (index === idx) progress(label, done, total);
+        })
+      : new VaultIndex(current.path, onChange);
   index = idx;
   idx.start().catch((e) => console.error('[index] failed', e));
 }
@@ -58,6 +67,20 @@ function isCopyPath(p: string): boolean {
   }
 }
 
+function progress(label: string, done: number, total: number): void {
+  win?.webContents.send(IPC.evProgress, { label, done, total });
+}
+
+function reposRoot(): string {
+  return path.join(app.getPath('userData'), 'repos');
+}
+
+/** Board layout for read-only repos lives in app data, keyed by repo path (never inside the repo). */
+function codeBoardFile(repo: string): string {
+  const h = crypto.createHash('sha1').update(repo.toLowerCase()).digest('hex').slice(0, 16);
+  return path.join(app.getPath('userData'), 'code-boards', `${h}.json`);
+}
+
 function setTitle(): void {
   win?.setTitle(current ? `Nexus Vault — ${current.name}` : 'Nexus Vault');
 }
@@ -75,14 +98,17 @@ function startCount(): void {
   ).catch(() => undefined);
 }
 
-async function openVault(p: string, isCopy?: boolean): Promise<VaultInfo> {
+async function openVault(p: string, isCopy?: boolean, opts: { mode?: 'notes' | 'code'; source?: string } = {}): Promise<VaultInfo> {
   const real = await fs.promises.realpath(p);
   const st = await fs.promises.stat(real);
   if (!st.isDirectory()) throw new Error('Not a folder');
-  current = { name: path.basename(real), path: real, isCopy: isCopy ?? isCopyPath(real) };
+  const prev = getSettings().recentVaults.find((r) => r.path === real);
+  const mode = opts.mode ?? (prev?.mode === 'code' || (await detectRepo(real)) ? 'code' : 'notes');
+  const source = opts.source ?? prev?.source;
+  current = { name: path.basename(real), path: real, isCopy: isCopy ?? isCopyPath(real), mode, readOnly: mode === 'code', ...(source ? { source } : {}) };
   const s = getSettings();
-  const recent = [{ name: current.name, path: real, isCopy: current.isCopy, lastOpened: Date.now() }, ...s.recentVaults.filter((r) => r.path !== real)];
-  updateSettings({ recentVaults: recent.slice(0, 15), lastVaultPath: real });
+  const recent = [{ name: current.name, path: real, isCopy: current.isCopy, lastOpened: Date.now(), mode, ...(source ? { source } : {}) }, ...s.recentVaults.filter((r) => r.path !== real)];
+  updateSettings({ recentVaults: recent.slice(0, 25), lastVaultPath: real });
   setTitle();
   startCount();
   void startIndex();
@@ -122,6 +148,7 @@ function registerIpc(): void {
     return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
   });
   ipcMain.handle(IPC.confirmReal, async (_e, p: string) => {
+    if (await detectRepo(p)) return 'real'; // code repos open read-only; no copy needed
     const opts = {
       type: 'warning' as const,
       title: 'Open the real vault?',
@@ -153,24 +180,29 @@ function registerIpc(): void {
     if (!current) throw new Error('No vault is open');
     return current.path;
   };
+  /** Same as v() but refuses when the open folder is a read-only code repo. */
+  const vw = () => {
+    if (current?.readOnly) throw new Error('This is a read-only code repo. Nexus Vault never modifies repo files.');
+    return v();
+  };
   ipcMain.handle(IPC.readNote, (_e, rel: string) => ops.readNote(v(), rel));
   ipcMain.handle(IPC.writeNote, async (_e, rel: string, content: string, mtime?: number) => {
-    const r = await ops.writeNote(v(), rel, content, mtime);
+    const r = await ops.writeNote(vw(), rel, content, mtime);
     index?.touch(rel);
     return r;
   });
   ipcMain.handle(IPC.createNote, async (_e, dir: string, name: string | null, content?: string) => {
-    const rel = await ops.createNote(v(), dir, name, content ?? '');
+    const rel = await ops.createNote(vw(), dir, name, content ?? '');
     index?.touch(rel);
     return rel;
   });
   ipcMain.handle(IPC.createFolder, async (_e, dir: string, name: string | null) => {
-    const rel = await ops.createFolder(v(), dir, name);
+    const rel = await ops.createFolder(vw(), dir, name);
     index?.touchDir(rel);
     return rel;
   });
   ipcMain.handle(IPC.renamePath, async (_e, rel: string, name: string) => {
-    const root = v();
+    const root = vw();
     const isDir = (await fs.promises.stat(await resolveInVault(root, rel))).isDirectory();
     const nrel = await ops.renamePath(root, rel, name);
     if (nrel !== rel) {
@@ -184,7 +216,7 @@ function registerIpc(): void {
     return nrel;
   });
   ipcMain.handle(IPC.deletePath, async (_e, rel: string) => {
-    const root = v();
+    const root = vw();
     const abs = await resolveInVault(root, rel);
     const isDir = (await fs.promises.stat(abs)).isDirectory();
     const opts = {
@@ -205,7 +237,7 @@ function registerIpc(): void {
     return to;
   });
   ipcMain.handle(IPC.duplicatePath, async (_e, rel: string) => {
-    const nrel = await ops.duplicatePath(v(), rel);
+    const nrel = await ops.duplicatePath(vw(), rel);
     index?.touch(nrel);
     index?.touchDir(nrel);
     return nrel;
@@ -219,15 +251,34 @@ function registerIpc(): void {
   ipcMain.handle(IPC.getGraph, () => index?.graph() ?? { nodes: [], links: [], version: -1 });
   ipcMain.handle(IPC.search, (_e, q: string) => index?.search(q) ?? []);
   ipcMain.handle(IPC.getNoteInfo, (_e, rel: string) => index?.noteInfo(rel) ?? null);
+  ipcMain.handle('index:links', () => index?.links() ?? []);
   ipcMain.handle(IPC.previews, (_e, rels: string[]) => index?.previews(rels) ?? {});
   ipcMain.handle(IPC.listNotes, () => ({ notes: index?.listNotes() ?? [], stats: index?.stats() ?? null, ready: !!index?.ready }));
-  ipcMain.handle(IPC.readBoard, () => ops.readBoard(v()));
-  ipcMain.handle(IPC.writeBoard, (_e, data: BoardFile) => ops.writeBoard(v(), data));
+  ipcMain.handle(IPC.readBoard, () => (current?.readOnly ? ops.readBoardAt(codeBoardFile(current.path)) : ops.readBoard(v())));
+  ipcMain.handle(IPC.writeBoard, (_e, data: BoardFile) => (current?.readOnly ? ops.writeBoardAt(codeBoardFile(current.path), data) : ops.writeBoard(v(), data)));
+  ipcMain.handle('vault:pick-repo', async (_e, kind: 'folder' | 'zip') => {
+    const opts =
+      kind === 'zip'
+        ? { title: 'Choose a repo .zip (e.g. GitHub "Download ZIP")', properties: ['openFile' as const], filters: [{ name: 'Zip archives', extensions: ['zip'] }] }
+        : { title: 'Choose a code project folder', properties: ['openDirectory' as const] };
+    const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+    return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+  });
+  ipcMain.handle(IPC.openCode, async (_e, p: string) => {
+    const st = await fs.promises.stat(p);
+    if (st.isFile()) {
+      if (!/\.zip$/i.test(p)) throw new Error('Drop a folder or a .zip file');
+      progress('Extracting zip…', 0, st.size);
+      const dir = await extractZip(p, reposRoot(), (d, t) => progress('Extracting zip…', d, t));
+      return openVault(dir, false, { mode: 'code', source: p });
+    }
+    return openVault(p, false, { mode: 'code' });
+  });
   ipcMain.handle(IPC.pickImage, async () => {
     const opts = { title: 'Choose an image', properties: ['openFile' as const], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'] }] };
     const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     if (r.canceled || !r.filePaths[0]) return null;
-    const rel = await ops.importImage(v(), r.filePaths[0]);
+    const rel = await ops.importImage(vw(), r.filePaths[0]);
     index?.touchDir(rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '');
     return rel;
   });
@@ -238,8 +289,8 @@ function registerIpc(): void {
     await shell.openExternal(url);
   });
   ipcMain.handle(IPC.addConnection, async (_e, src: string, target: string, label?: string) => {
-    const root = v();
-    if (!index) throw new Error('Index not ready');
+    const root = vw();
+    if (!(index instanceof VaultIndex)) throw new Error('Index not ready');
     const note = await ops.readNote(root, src);
     if (hasLinkTo(note.content, src, target, index.byName, index.byPath)) return false;
     await ops.writeNote(root, src, addConnectionText(note.content, linkNameFor(target, index.byName), label || undefined));
@@ -247,8 +298,8 @@ function registerIpc(): void {
     return true;
   });
   ipcMain.handle(IPC.removeConnection, async (_e, src: string, target: string) => {
-    const root = v();
-    if (!index) throw new Error('Index not ready');
+    const root = vw();
+    if (!(index instanceof VaultIndex)) throw new Error('Index not ready');
     const note = await ops.readNote(root, src);
     const next = removeLinkText(note.content, src, target, index.byName, index.byPath);
     if (next === note.content) return false;

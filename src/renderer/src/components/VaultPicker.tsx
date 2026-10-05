@@ -1,6 +1,6 @@
 // Welcome screen / vault picker shown when no vault is open (Grok Bot).
 import type { RecentVaultView } from '../../../shared/types';
-import { CopyIcon, FolderOpenIcon, Logo } from './icons';
+import { CodeIcon, CopyIcon, FolderOpenIcon, Logo } from './icons';
 
 interface Props {
   recent: RecentVaultView[];
@@ -9,6 +9,7 @@ interface Props {
   onOpenReal: () => void;
   onOpenRecent: (p: string) => void;
   onRemove: (p: string) => void;
+  onOpenCode: () => void;
 }
 
 function when(ts: number): string {
@@ -16,7 +17,8 @@ function when(ts: number): string {
   return new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export function VaultPicker({ recent, busy, onOpenCopy, onOpenReal, onOpenRecent, onRemove }: Props) {
+export function VaultPicker({ recent: all, busy, onOpenCopy, onOpenReal, onOpenRecent, onRemove, onOpenCode }: Props) {
+  const recent = all.filter((r) => r.mode !== 'code');
   return (
     <div className="welcome">
       <div className="card">
@@ -24,7 +26,7 @@ export function VaultPicker({ recent, busy, onOpenCopy, onOpenReal, onOpenRecent
           <Logo size={40} />
           <h1>Nexus Vault</h1>
         </div>
-        <p>Open an Obsidian-style folder of Markdown notes. Everything stays on this computer. M0 is read-only.</p>
+        <p>Open an Obsidian-style folder of Markdown notes. Everything stays on this computer. Every edit is backed up first.</p>
         <button className="btn primary" onClick={onOpenCopy} disabled={!!busy}>
           <CopyIcon />
           <span>
@@ -37,6 +39,13 @@ export function VaultPicker({ recent, busy, onOpenCopy, onOpenReal, onOpenRecent
           <span>
             Open folder as vault…
             <small>Opens your real vault folder (you will be asked to confirm).</small>
+          </span>
+        </button>
+        <button className="btn" onClick={onOpenCode} disabled={!!busy}>
+          <CodeIcon />
+          <span>
+            Open GitHub repo / code project…
+            <small>Drop a repo folder or a GitHub “Download ZIP”. Shown as an architecture board + import graph. Strictly read-only.</small>
           </span>
         </button>
         {busy && (

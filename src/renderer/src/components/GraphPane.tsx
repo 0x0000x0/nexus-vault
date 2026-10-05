@@ -115,7 +115,7 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
     <section className="pane" style={{ flex: 1 }} data-pane="graph">
       <div className="panehead">
         <GraphIcon size={13} />
-        <b>Graph</b> <span className="hcount">{app.graph.nodes.filter((n) => !n.ghost).length} notes · {app.graph.links.length} links</span>
+        <b>Graph</b> <span className="hcount">{app.graph.nodes.filter((n) => !n.ghost).length} {app.readOnly ? (app.graph.nodes.some((n) => n.id.startsWith('dir:')) ? 'folders (collapsed)' : 'files') : 'notes'} · {app.graph.links.length} {app.readOnly ? 'imports' : 'links'}</span>
         <div className="r">
           <MaxBtn single={view === 'graph'} onMax={onMax} />
         </div>
@@ -187,7 +187,12 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
           onNodeClick={(n) => {
             const id = n.id as string;
             if (n.ghost) {
-              app.notify(`"${n.title}" does not exist yet (unresolved link).`);
+              app.notify(app.readOnly ? `"${n.title}" is an external package (not in this repo).` : `"${n.title}" does not exist yet (unresolved link).`);
+              return;
+            }
+            if (id.startsWith('dir:')) {
+              const d = id.slice(4);
+              app.openOnBoard(d === '(root)' ? '' : d, 'folder');
               return;
             }
             app.select(id);

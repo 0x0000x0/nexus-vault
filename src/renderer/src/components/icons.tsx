@@ -32,6 +32,7 @@ export const MonitorIcon = () => <S size={13}><rect x="3" y="4" width="18" heigh
 export const CollapseIcon = () => <S size={14}><path d="M7 15l5-5 5 5" /></S>;
 export const RefreshIcon = () => <S size={14}><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" /></S>;
 export const FolderOpenIcon = () => <S size={16}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H7l-4 9z" /><path d="M3 19l3.5-8H22l-3.5 8z" /></S>;
+export const CodeIcon = () => <S size={16}><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16" /></S>;
 export const CopyIcon = () => <S size={16}><rect x="8" y="8" width="13" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></S>;
 
 export const FolderIcon = () => (

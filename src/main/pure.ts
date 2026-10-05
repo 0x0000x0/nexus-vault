@@ -57,8 +57,8 @@ export function normalizeSettings(raw: unknown): Settings {
   const recent = Array.isArray(r.recentVaults)
     ? r.recentVaults
         .filter((v: any) => v && typeof v.path === 'string' && typeof v.name === 'string')
-        .map((v: any) => ({ name: v.name, path: v.path, isCopy: !!v.isCopy, lastOpened: Number(v.lastOpened) || 0 }))
-        .slice(0, 15)
+        .map((v: any) => ({ name: v.name, path: v.path, isCopy: !!v.isCopy, lastOpened: Number(v.lastOpened) || 0, mode: (v.mode === 'code' ? 'code' : 'notes') as 'code' | 'notes', ...(typeof v.source === 'string' ? { source: v.source } : {}) }))
+        .slice(0, 25)
     : [];
   const wb = r.windowBounds;
   return {

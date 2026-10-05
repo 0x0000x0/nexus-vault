@@ -284,3 +284,27 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .panehead .r { flex: none; }
 .gtools { position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; max-width: 60%; }
 .gtools .chipbtn { box-shadow: var(--shadow); }
+
+/* code mode (Grok Bot) */
+.codeview { display: flex; flex: 1; min-height: 0; font: 12px/1.55 "Cascadia Mono", Consolas, ui-monospace, monospace; background: var(--card); }
+.codeview pre { margin: 0; padding: 10px 8px; }
+.codeview .gutter { color: var(--faint); text-align: right; user-select: none; border-right: 1px solid var(--border); flex: none; }
+.codeview .src { flex: 1; overflow: visible; white-space: pre; user-select: text; tab-size: 4; }
+.npbody:has(.codeview) { overflow: auto; }
+.tk-c { color: #6a9955; } .tk-s { color: #c2803d; } .tk-n { color: #2e9b8f; } .tk-k { color: #8b6cf6; font-weight: 600; }
+[data-theme="dark"] .tk-s { color: #ce9178; } [data-theme="dark"] .tk-n { color: #4ec9b0; } [data-theme="dark"] .tk-k { color: #b39dff; }
+.bnode.note.code .cp { font: 10.5px/1.45 "Cascadia Mono", Consolas, monospace; white-space: pre; }
+.bnode.note.code .ct { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+.repodrop { width: 640px; max-width: 92vw; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow2); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; max-height: 80vh; overflow: auto; }
+.rdhead { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.rdhead .iconbtn { margin-left: auto; }
+.dropzone { border: 2px dashed var(--border); border-radius: 12px; padding: 34px 20px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; color: var(--muted); background: var(--bg); transition: border-color .15s, background .15s; }
+.dropzone.over { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.dropzone .dzt { font-size: 17px; font-weight: 600; color: var(--text); }
+.dropzone .dzb { display: flex; gap: 8px; margin-top: 8px; }
+.small { font-size: 11.5px; }
+.progress { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 400; width: 380px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow2); padding: 10px 14px; font-size: 12px; }
+.progress .bar { height: 6px; background: var(--panel2); border-radius: 3px; margin-top: 7px; overflow: hidden; }
+.progress .bar i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+.progress .bar i.indet { animation: indet 1.2s ease-in-out infinite; }
+@keyframes indet { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }

@@ -120,7 +120,7 @@ export function FolderTree({ vault, width, selected, openRel, onSelect, reveal }
   const activate = (e: DirEntry) => {
     onSelect(e.relPath, e);
     if (e.kind === 'folder') toggle(e.relPath);
-    else if (e.ext === 'md') app.openNote(e.relPath);
+    else if (e.ext === 'md' || (app.readOnly && app.files.has(e.relPath))) app.openNote(e.relPath);
   };
 
   const onKey = (ev: React.KeyboardEvent) => {
@@ -144,8 +144,8 @@ export function FolderTree({ vault, width, selected, openRel, onSelect, reveal }
         if (parent) sel(rows.findIndex((r) => r.e.relPath === parent));
       }
     } else if (ev.key === 'Enter' && cur) activate(cur);
-    else if (ev.key === 'F2' && cur) void rename(cur);
-    else if (ev.key === 'Delete' && cur) void del(cur);
+    else if (ev.key === 'F2' && cur && !app.readOnly) void rename(cur);
+    else if (ev.key === 'Delete' && cur && !app.readOnly) void del(cur);
     else return;
     ev.preventDefault();
   };
@@ -219,33 +219,34 @@ export function FolderTree({ vault, width, selected, openRel, onSelect, reveal }
     ev.preventDefault();
     ev.stopPropagation();
     let items: MenuItem[];
+    const ro = app.readOnly;
     if (!e) {
       items = [
-        { label: 'New note', onClick: () => void newNoteIn('') },
-        { label: 'New folder', onClick: () => void newFolderIn('') },
+        { label: 'New note', onClick: () => void newNoteIn(''), disabled: ro },
+        { label: 'New folder', onClick: () => void newFolderIn(''), disabled: ro },
         { sep: true, label: '' },
         { label: 'Open vault root on board', onClick: () => app.openOnBoard('', 'folder') },
         { label: revealLabel, onClick: () => void reveal_('') },
       ];
     } else {
       onSelect(e.relPath, e);
-      const isMd = e.kind === 'file' && e.ext === 'md';
+      const isMd = e.kind === 'file' && (e.ext === 'md' || (ro && app.files.has(e.relPath)));
       const dir = e.kind === 'folder' ? e.relPath : dirOf(e.relPath);
       items = [
         ...(isMd ? [{ label: 'Open', onClick: () => app.openNote(e.relPath) }] : []),
-        { label: e.kind === 'folder' ? 'New note in folder' : 'New note', onClick: () => void newNoteIn(dir) },
-        { label: e.kind === 'folder' ? 'New subfolder' : 'New folder', onClick: () => void newFolderIn(dir) },
+        { label: e.kind === 'folder' ? 'New note in folder' : 'New note', onClick: () => void newNoteIn(dir), disabled: ro },
+        { label: e.kind === 'folder' ? 'New subfolder' : 'New folder', onClick: () => void newFolderIn(dir), disabled: ro },
         { sep: true, label: '' },
         { label: 'Open on board', onClick: () => app.openOnBoard(e.relPath, e.kind), disabled: e.kind === 'file' && !isMd && !IMAGE_EXT.has(e.ext) },
         { label: 'Show in graph', onClick: () => app.showInGraph(e.relPath), disabled: !isMd },
         { sep: true, label: '' },
-        { label: 'Rename…', hint: 'F2', onClick: () => void rename(e) },
-        { label: 'Duplicate', onClick: () => void duplicate(e) },
+        { label: 'Rename…', hint: 'F2', onClick: () => void rename(e), disabled: ro },
+        { label: 'Duplicate', onClick: () => void duplicate(e), disabled: ro },
         { sep: true, label: '' },
         { label: revealLabel, onClick: () => void reveal_(e.relPath) },
         { label: 'Copy path', onClick: () => void copyPath(e.relPath) },
         { sep: true, label: '' },
-        { label: 'Delete…', hint: 'Del', danger: true, onClick: () => void del(e) },
+        { label: 'Delete…', hint: 'Del', danger: true, onClick: () => void del(e), disabled: ro },
       ];
     }
     setMenu({ x: ev.clientX, y: ev.clientY, items });
@@ -255,12 +256,16 @@ export function FolderTree({ vault, width, selected, openRel, onSelect, reveal }
     <aside className="tree" style={{ width }} aria-label="Files">
       <div className="treehead">
         <span className="lbl">Files</span>
-        <button className="iconbtn" title="New note" onClick={() => void newNoteIn('')}>
-          <NoteIcon />
-        </button>
-        <button className="iconbtn" title="New folder" onClick={() => void newFolderIn('')}>
-          <FolderIcon />
-        </button>
+        {!app.readOnly && (
+          <>
+            <button className="iconbtn" title="New note" onClick={() => void newNoteIn('')}>
+              <NoteIcon />
+            </button>
+            <button className="iconbtn" title="New folder" onClick={() => void newFolderIn('')}>
+              <FolderIcon />
+            </button>
+          </>
+        )}
         <button className="iconbtn" title="Collapse all" onClick={() => setExpanded(new Set())}>
           <CollapseIcon />
         </button>
