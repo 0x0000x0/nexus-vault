@@ -2,7 +2,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BoardData, BoardEdge, BoardFile, BoardNode, BoardNodeType, DirEntry, FsChange, ViewMode } from '../../../shared/types';
 import { baseName, dirOf, errMsg, folderColor, noteTitle, useApp } from '../ctx';
-import { bbox, CARD, clipToRect, emptyBoard, freeSlot, inside, normalizeBoard, normalizeUrl, uid } from './board-utils';
+import { bbox, CARD, clipToRect, freeSlot, inside, normalizeBoard, normalizeUrl, uid } from './board-utils';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DRAG_MIME } from './FolderTree';
 import { BoardIcon, FolderIcon, ImageIcon } from './icons';
@@ -148,9 +148,10 @@ export function BoardPane(p: Props) {
       return true;
     });
     let changed = nodes.length !== b.nodes.length;
+    const cols = gridCols();
     const add = (e: DirEntry, type: BoardNodeType) => {
       const sz = CARD[type as 'note' | 'folder'];
-      const pos = freeSlot(nodes, sz.w, sz.h);
+      const pos = freeSlot(nodes, sz.w, sz.h, cols);
       nodes.push({ id: uid(), type, x: pos.x, y: pos.y, w: sz.w, h: sz.h, file: e.relPath });
       changed = true;
     };
@@ -222,6 +223,9 @@ export function BoardPane(p: Props) {
   }, [app.graph.links, noteNode, board.edges, pending, byId]);
   useEffect(() => setPending([]), [app.graph.version]);
 
+  /** Grid columns that fit the visible pane at ~80% zoom (2..6). */
+  const gridCols = () => Math.max(2, Math.min(6, Math.floor(((wrapRef.current?.clientWidth ?? 800) / 0.8 - 40) / 250)));
+
   // ---------- coordinates ----------
   const toWorld = (cx: number, cy: number) => {
     const r = wrapRef.current!.getBoundingClientRect();
@@ -238,8 +242,11 @@ export function BoardPane(p: Props) {
     const el = wrapRef.current;
     const bb = bbox(boardRef.current.nodes);
     if (!el || !bb) return setView({ x: 0, y: 0, k: 1 });
-    const k = Math.max(0.15, Math.min(1.2, Math.min((el.clientWidth - 60) / bb.w, (el.clientHeight - 60) / bb.h)));
-    setView({ k, x: (el.clientWidth - bb.w * k) / 2 - bb.x * k, y: (el.clientHeight - bb.h * k) / 2 - bb.y * k });
+    const k = Math.max(0.55, Math.min(1.1, Math.min((el.clientWidth - 60) / bb.w, (el.clientHeight - 60) / bb.h)));
+    // Center if it fits; otherwise start at the top-left of the content (readable zoom beats seeing everything).
+    const x = bb.w * k <= el.clientWidth - 40 ? (el.clientWidth - bb.w * k) / 2 - bb.x * k : 20 - bb.x * k;
+    const y = bb.h * k <= el.clientHeight - 40 ? (el.clientHeight - bb.h * k) / 2 - bb.y * k : 20 - bb.y * k;
+    setView({ k, x, y });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folder]);
   const centerOn = (n: BoardNode) => {
@@ -330,7 +337,7 @@ export function BoardPane(p: Props) {
       const isDir = entries.list.some((e) => e.relPath === f.rel && e.kind === 'folder');
       const type: BoardNodeType = isDir ? 'folder' : IMAGE_EXT.test(f.rel) ? 'image' : 'note';
       const sz = CARD[type];
-      const pos = freeSlot(board.nodes, sz.w, sz.h);
+      const pos = freeSlot(board.nodes, sz.w, sz.h, gridCols());
       const node = { type, file: f.rel, x: pos.x, y: pos.y, w: sz.w, h: sz.h };
       addNode(node);
       centerOn({ ...node, id: '' });
@@ -634,6 +641,7 @@ export function BoardPane(p: Props) {
   };
 
   const relayout = () => {
+    const cols = gridCols();
     update((b) => {
       const placed: BoardNode[] = [];
       const order = [...b.nodes].sort((x, y) => (x.type === 'folder' ? 0 : 1) - (y.type === 'folder' ? 0 : 1));
@@ -642,7 +650,7 @@ export function BoardPane(p: Props) {
           placed.push(n);
           continue;
         }
-        const pos = freeSlot(placed.filter((x) => x.type !== 'group'), n.w, n.h);
+        const pos = freeSlot(placed.filter((x) => x.type !== 'group'), n.w, n.h, cols);
         placed.push({ ...n, x: pos.x, y: pos.y });
       }
       return { ...b, nodes: placed };

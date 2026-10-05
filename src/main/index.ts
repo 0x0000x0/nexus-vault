@@ -352,24 +352,36 @@ function createWindow(): void {
   if (process.env.NEXUS_SCREENSHOT) setupScreenshot(win, process.env.NEXUS_SCREENSHOT);
 }
 
-/** Test-only hook: expand a few folders, select a note, capture the window, quit. */
+/** Test-only hook: run JS steps (";;"-separated; "SHOT <path>" captures, "WAIT <ms>" sleeps), then quit. */
 function setupScreenshot(w: BrowserWindow, out: string): void {
   w.webContents.on('console-message', (e) => console.log('[renderer]', e.level, e.message));
   w.webContents.on('preload-error', (_e, p, err) => console.log('[preload-error]', p, err));
   w.webContents.once('did-finish-load', async () => {
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    await wait(1500);
+    const shot = async (file: string) => {
+      const img = await w.webContents.capturePage();
+      fs.writeFileSync(file, img.toPNG());
+      console.log('[screenshot] saved', file);
+    };
+    await wait(Number(process.env.NEXUS_SCREENSHOT_WAIT ?? 2500));
     const script = process.env.NEXUS_SCREENSHOT_JS;
     if (script) {
-      for (const step of script.split(';;')) {
-        await w.webContents.executeJavaScript(step).catch((e) => console.error('screenshot step failed', e));
-        await wait(400);
+      for (const raw of script.split(';;')) {
+        const step = raw.trim();
+        if (!step) continue;
+        if (step.startsWith('SHOT ')) await shot(step.slice(5).trim());
+        else if (step.startsWith('WAIT ')) await wait(Number(step.slice(5)));
+        else {
+          const r = await w.webContents.executeJavaScript(step).catch((e) => `ERR ${e}`);
+          if (r !== undefined) console.log('[step]', String(r).slice(0, 300));
+          await wait(400);
+        }
       }
     }
-    await wait(800);
-    const img = await w.webContents.capturePage();
-    fs.writeFileSync(out, img.toPNG());
-    console.log('[screenshot] saved', out, `visible=${w.isVisible()} focused=${w.isFocused()}`);
+    if (out !== '-') {
+      await wait(800);
+      await shot(out);
+    }
     app.quit();
   });
 }

@@ -24,9 +24,9 @@ export function overlaps(a: { x: number; y: number; w: number; h: number }, b: {
 }
 
 /** First free cell in the grid (row-major) that does not overlap existing nodes. */
-export function freeSlot(nodes: BoardNode[], w: number, h: number): { x: number; y: number } {
+export function freeSlot(nodes: BoardNode[], w: number, h: number, cols: number = GRID.cols): { x: number; y: number } {
   for (let r = 0; r < 2000; r++) {
-    for (let c = 0; c < GRID.cols; c++) {
+    for (let c = 0; c < cols; c++) {
       const cand = { x: GRID.x0 + c * GRID.dx, y: GRID.y0 + r * GRID.dy, w, h };
       if (!nodes.some((n) => n.type !== 'group' && overlaps(cand, n))) return cand;
     }

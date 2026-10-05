@@ -67,7 +67,7 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   paneRatio: 0.5,
   paneOrder: 'board-graph',
   view: 'split',
-  notePanelOpen: true,
+  notePanelOpen: false,
   notePanelWidth: 380,
 };
 

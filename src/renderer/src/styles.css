@@ -280,3 +280,5 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .modehint { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #fff; padding: 4px 12px; border-radius: 12px; font-size: 12px; z-index: 6; pointer-events: none; }
 .status .warn { color: var(--c-orange); }
 .status .ro { color: var(--c-blue); font-weight: 600; }
+.panehead .hcount { overflow: hidden; text-overflow: ellipsis; }
+.panehead .r { flex: none; }

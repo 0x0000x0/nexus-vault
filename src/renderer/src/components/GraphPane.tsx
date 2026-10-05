@@ -104,13 +104,18 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
     ? { text: '#dcddde', link: 'rgba(160,160,160,0.28)', linkHl: '#8b6cf6', ghost: '#555', bg: '#1e1e1e' }
     : { text: '#1f1f1f', link: 'rgba(90,90,90,0.25)', linkHl: '#8b6cf6', ghost: '#bdbdbd', bg: '#f7f7f5' };
 
+  // Only the most-linked ~12% get a permanent label; others show on hover / zoom-in.
+  const labelDegree = useMemo(() => {
+    const d = app.graph.nodes.map((n) => n.degree).sort((a, b) => b - a);
+    return Math.max(4, d[Math.floor(d.length * 0.12)] ?? 4);
+  }, [app.graph]);
   const nodeR = (n: N) => 3 + Math.sqrt(n.degree ?? 0) * 1.6;
 
   return (
     <section className="pane" style={{ flex: 1 }} data-pane="graph">
       <div className="panehead">
         <GraphIcon size={13} />
-        <b>Graph</b> · {app.vault.name} · {app.graph.nodes.filter((n) => !n.ghost).length} notes · {app.graph.links.length} links
+        <b>Graph</b> <span className="hcount">{app.graph.nodes.filter((n) => !n.ghost).length} notes · {app.graph.links.length} links</span>
         <div className="r">
           <button className={`chipbtn${showLabels ? ' on' : ''}`} onClick={() => setShowLabels(!showLabels)} title="Show note names">
             Labels
@@ -220,7 +225,7 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
               ctx.stroke();
             }
             const important = id === hover || id === selected || (hl && hl.has(id));
-            if (showLabels && (important || scale > 1.4 || (n.degree ?? 0) >= 6)) {
+            if (showLabels && (important || scale > 2.2 || (n.degree ?? 0) >= labelDegree)) {
               const fs = Math.max(10 / scale, 2.5);
               ctx.font = `${important ? 600 : 400} ${fs}px "Segoe UI", system-ui, sans-serif`;
               ctx.textAlign = 'center';
