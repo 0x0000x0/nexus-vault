@@ -1,8 +1,12 @@
 // Electron main process for Nexus Vault M0. Written by Grok Bot (replaces OpenCode WIP).
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, session, shell, type MenuItemConstructorOptions } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import { IPC, type LayoutSettings, type RecentVaultView, type ThemePref, type VaultInfo } from '../shared/types';
+import { IPC, type BoardFile, type LayoutSettings, type RecentVaultView, type ThemePref, type VaultInfo } from '../shared/types';
+import { VaultIndex } from './indexer';
+import * as ops from './fileops';
+import { addConnectionText, hasLinkTo, linkNameFor, removeLinkText } from './parse';
+import { resolveInVault } from './vault';
 import { flushSettings, getSettings, updateSettings } from './settings';
 import { countNotes, listDir, safeCopy } from './vault';
 import { isInside } from './pure';
@@ -13,6 +17,20 @@ const isDev = !app.isPackaged && !!process.env.ELECTRON_RENDERER_URL;
 let win: BrowserWindow | null = null;
 let current: VaultInfo | null = null;
 let countToken = 0;
+let index: VaultIndex | null = null;
+
+async function startIndex(): Promise<void> {
+  await index?.close();
+  index = null;
+  if (!current) return;
+  const idx = new VaultIndex(current.path, (stats, fsChange) => {
+    if (index !== idx) return;
+    win?.webContents.send(IPC.evIndexChanged, stats);
+    if (fsChange.dirs.length || fsChange.files.length) win?.webContents.send(IPC.evFsChanged, fsChange);
+  });
+  index = idx;
+  idx.start().catch((e) => console.error('[index] failed', e));
+}
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -67,12 +85,15 @@ async function openVault(p: string, isCopy?: boolean): Promise<VaultInfo> {
   updateSettings({ recentVaults: recent.slice(0, 15), lastVaultPath: real });
   setTitle();
   startCount();
+  void startIndex();
   return current;
 }
 
 function closeVault(): void {
   current = null;
   countToken++;
+  void index?.close();
+  index = null;
   updateSettings({ lastVaultPath: undefined });
   setTitle();
 }
@@ -106,7 +127,7 @@ function registerIpc(): void {
       title: 'Open the real vault?',
       message: `You are opening your REAL vault:\n${p}`,
       detail:
-        'Nexus Vault M0 is read-only, so this is safe today. Future versions will be able to write to the vault. A safe copy is recommended while testing.',
+        'Nexus Vault can now edit notes, create/rename/delete files and draw links into notes. Every change is backed up into .nexus-backups and deletes go to the vault .trash folder, but a safe copy is strongly recommended while testing.',
       buttons: ['Open real vault', 'Make a safe copy instead', 'Cancel'],
       defaultId: 1,
       cancelId: 2,
@@ -126,6 +147,114 @@ function registerIpc(): void {
     return current;
   });
   ipcMain.handle(IPC.listDir, (_e, root: string, rel: string) => listDir(requireVault(root), rel));
+
+  // ---- M1/M2: notes, file ops, index, board
+  const v = () => {
+    if (!current) throw new Error('No vault is open');
+    return current.path;
+  };
+  ipcMain.handle(IPC.readNote, (_e, rel: string) => ops.readNote(v(), rel));
+  ipcMain.handle(IPC.writeNote, async (_e, rel: string, content: string, mtime?: number) => {
+    const r = await ops.writeNote(v(), rel, content, mtime);
+    index?.touch(rel);
+    return r;
+  });
+  ipcMain.handle(IPC.createNote, async (_e, dir: string, name: string | null, content?: string) => {
+    const rel = await ops.createNote(v(), dir, name, content ?? '');
+    index?.touch(rel);
+    return rel;
+  });
+  ipcMain.handle(IPC.createFolder, async (_e, dir: string, name: string | null) => {
+    const rel = await ops.createFolder(v(), dir, name);
+    index?.touchDir(rel);
+    return rel;
+  });
+  ipcMain.handle(IPC.renamePath, async (_e, rel: string, name: string) => {
+    const root = v();
+    const isDir = (await fs.promises.stat(await resolveInVault(root, rel))).isDirectory();
+    const nrel = await ops.renamePath(root, rel, name);
+    if (nrel !== rel) {
+      await ops.renameInBoard(root, rel, nrel);
+      if (isDir) index?.touchDir(rel);
+      else {
+        index?.touch(rel, 'remove');
+        index?.touch(nrel);
+      }
+    }
+    return nrel;
+  });
+  ipcMain.handle(IPC.deletePath, async (_e, rel: string) => {
+    const root = v();
+    const abs = await resolveInVault(root, rel);
+    const isDir = (await fs.promises.stat(abs)).isDirectory();
+    const opts = {
+      type: 'warning' as const,
+      title: 'Delete',
+      message: `Delete ${isDir ? 'folder' : 'file'} "${path.basename(abs)}"?`,
+      detail: `It will be moved to the vault's .trash folder (recoverable).${isDir ? ' Everything inside the folder goes with it.' : ''}`,
+      buttons: ['Delete', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    };
+    const r = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
+    if (r.response !== 0) return null;
+    const to = await ops.deletePath(root, rel);
+    if (isDir) index?.touchDir(rel);
+    else index?.touch(rel, 'remove');
+    return to;
+  });
+  ipcMain.handle(IPC.duplicatePath, async (_e, rel: string) => {
+    const nrel = await ops.duplicatePath(v(), rel);
+    index?.touch(nrel);
+    index?.touchDir(nrel);
+    return nrel;
+  });
+  ipcMain.handle(IPC.revealPath, async (_e, rel: string) => shell.showItemInFolder(await resolveInVault(v(), rel)));
+  ipcMain.handle(IPC.copyPath, async (_e, rel: string) => {
+    const abs = await resolveInVault(v(), rel);
+    clipboard.writeText(abs);
+    return abs;
+  });
+  ipcMain.handle(IPC.getGraph, () => index?.graph() ?? { nodes: [], links: [], version: -1 });
+  ipcMain.handle(IPC.search, (_e, q: string) => index?.search(q) ?? []);
+  ipcMain.handle(IPC.getNoteInfo, (_e, rel: string) => index?.noteInfo(rel) ?? null);
+  ipcMain.handle(IPC.listNotes, () => ({ notes: index?.listNotes() ?? [], stats: index?.stats() ?? null, ready: !!index?.ready }));
+  ipcMain.handle(IPC.readBoard, () => ops.readBoard(v()));
+  ipcMain.handle(IPC.writeBoard, (_e, data: BoardFile) => ops.writeBoard(v(), data));
+  ipcMain.handle(IPC.pickImage, async () => {
+    const opts = { title: 'Choose an image', properties: ['openFile' as const], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'] }] };
+    const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+    if (r.canceled || !r.filePaths[0]) return null;
+    const rel = await ops.importImage(v(), r.filePaths[0]);
+    index?.touchDir(rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '');
+    return rel;
+  });
+  ipcMain.handle(IPC.readImage, (_e, rel: string) => ops.readImage(v(), rel));
+  ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
+    // Only on explicit user action (double-click on a link card); opens the system browser, not the app.
+    if (!/^https?:\/\//i.test(url)) throw new Error('Only http(s) links can be opened');
+    await shell.openExternal(url);
+  });
+  ipcMain.handle(IPC.addConnection, async (_e, src: string, target: string, label?: string) => {
+    const root = v();
+    if (!index) throw new Error('Index not ready');
+    const note = await ops.readNote(root, src);
+    if (hasLinkTo(note.content, src, target, index.byName, index.byPath)) return false;
+    await ops.writeNote(root, src, addConnectionText(note.content, linkNameFor(target, index.byName), label || undefined));
+    index.touch(src);
+    return true;
+  });
+  ipcMain.handle(IPC.removeConnection, async (_e, src: string, target: string) => {
+    const root = v();
+    if (!index) throw new Error('Index not ready');
+    const note = await ops.readNote(root, src);
+    const next = removeLinkText(note.content, src, target, index.byName, index.byPath);
+    if (next === note.content) return false;
+    await ops.writeNote(root, src, next);
+    index.touch(src);
+    return true;
+  });
 }
 
 function buildMenu(): void {

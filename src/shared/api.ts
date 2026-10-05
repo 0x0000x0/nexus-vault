@@ -1,5 +1,5 @@
 // Type of the window.nexus bridge (implemented in src/preload/index.ts). Grok Bot.
-import type { DirEntry, LayoutSettings, NoteCount, RecentVaultView, Settings, ThemePref, VaultInfo } from './types';
+import type { BoardFile, DirEntry, FsChange, GraphData, IndexStats, LayoutSettings, NoteCount, NoteFile, NoteInfo, RecentVaultView, SearchHit, Settings, ThemePref, VaultInfo } from './types';
 
 export interface NexusApi {
   getSettings(): Promise<Settings>;
@@ -14,7 +14,33 @@ export interface NexusApi {
   closeVault(): Promise<void>;
   getCurrent(): Promise<VaultInfo | null>;
   listDir(root: string, rel: string): Promise<DirEntry[]>;
+  // notes + file ops (all paths vault-relative, forward slashes)
+  readNote(rel: string): Promise<NoteFile>;
+  writeNote(rel: string, content: string, expectedMtime?: number): Promise<NoteFile>;
+  createNote(dir: string, name: string | null, content?: string): Promise<string>;
+  createFolder(dir: string, name: string | null): Promise<string>;
+  renamePath(rel: string, newName: string): Promise<string>;
+  deletePath(rel: string): Promise<string | null>;
+  duplicatePath(rel: string): Promise<string>;
+  revealPath(rel: string): Promise<void>;
+  copyPath(rel: string): Promise<string>;
+  // index
+  getGraph(): Promise<GraphData>;
+  search(q: string): Promise<SearchHit[]>;
+  getNoteInfo(rel: string): Promise<NoteInfo | null>;
+  listNotes(): Promise<{ notes: { rel: string; title: string }[]; stats: IndexStats | null; ready: boolean }>;
+  // board
+  readBoard(): Promise<BoardFile>;
+  writeBoard(data: BoardFile): Promise<void>;
+  pickImage(): Promise<string | null>;
+  readImage(rel: string): Promise<string>;
+  openExternal(url: string): Promise<void>;
+  addConnection(src: string, target: string, label?: string): Promise<boolean>;
+  removeConnection(src: string, target: string): Promise<boolean>;
+  // events
   onNoteCount(cb: (n: NoteCount) => void): () => void;
   onSystemTheme(cb: (t: 'light' | 'dark') => void): () => void;
+  onIndexChanged(cb: (s: IndexStats) => void): () => void;
+  onFsChanged(cb: (c: FsChange) => void): () => void;
   platform: string;
 }

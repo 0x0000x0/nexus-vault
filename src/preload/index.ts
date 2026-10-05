@@ -1,6 +1,6 @@
 // Minimal typed bridge exposed as window.nexus. Grok Bot.
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import { IPC, type DirEntry, type LayoutSettings, type NoteCount, type RecentVaultView, type Settings, type ThemePref, type VaultInfo } from '../shared/types';
+import { IPC, type FsChange, type IndexStats, type NoteCount } from '../shared/types';
 import type { NexusApi } from '../shared/api';
 
 function on<T>(channel: string, cb: (v: T) => void): () => void {
@@ -9,21 +9,48 @@ function on<T>(channel: string, cb: (v: T) => void): () => void {
   return () => ipcRenderer.removeListener(channel, h);
 }
 
+const inv =
+  (ch: string) =>
+  (...args: unknown[]) =>
+    ipcRenderer.invoke(ch, ...args);
+
 const api: NexusApi = {
-  getSettings: (): Promise<Settings> => ipcRenderer.invoke(IPC.getSettings),
-  setTheme: (t: ThemePref): Promise<ThemePref> => ipcRenderer.invoke(IPC.setTheme, t),
-  setLayout: (l: Partial<LayoutSettings>): Promise<LayoutSettings> => ipcRenderer.invoke(IPC.setLayout, l),
-  getRecent: (): Promise<RecentVaultView[]> => ipcRenderer.invoke(IPC.getRecent),
-  removeRecent: (p: string): Promise<void> => ipcRenderer.invoke(IPC.removeRecent, p),
-  pickFolder: (title: string): Promise<string | null> => ipcRenderer.invoke(IPC.pickFolder, title),
-  confirmReal: (p: string): Promise<'real' | 'copy' | 'cancel'> => ipcRenderer.invoke(IPC.confirmReal, p),
-  openVault: (p: string): Promise<VaultInfo> => ipcRenderer.invoke(IPC.openVault, p),
-  safeCopy: (src: string): Promise<VaultInfo> => ipcRenderer.invoke(IPC.safeCopy, src),
-  closeVault: (): Promise<void> => ipcRenderer.invoke(IPC.closeVault),
-  getCurrent: (): Promise<VaultInfo | null> => ipcRenderer.invoke(IPC.getCurrent),
-  listDir: (root: string, rel: string): Promise<DirEntry[]> => ipcRenderer.invoke(IPC.listDir, root, rel),
-  onNoteCount: (cb: (n: NoteCount) => void) => on<NoteCount>(IPC.evNoteCount, cb),
-  onSystemTheme: (cb: (t: 'light' | 'dark') => void) => on<'light' | 'dark'>(IPC.evSystemTheme, cb),
+  getSettings: inv(IPC.getSettings),
+  setTheme: inv(IPC.setTheme),
+  setLayout: inv(IPC.setLayout),
+  getRecent: inv(IPC.getRecent),
+  removeRecent: inv(IPC.removeRecent),
+  pickFolder: inv(IPC.pickFolder),
+  confirmReal: inv(IPC.confirmReal),
+  openVault: inv(IPC.openVault),
+  safeCopy: inv(IPC.safeCopy),
+  closeVault: inv(IPC.closeVault),
+  getCurrent: inv(IPC.getCurrent),
+  listDir: inv(IPC.listDir),
+  readNote: inv(IPC.readNote),
+  writeNote: inv(IPC.writeNote),
+  createNote: inv(IPC.createNote),
+  createFolder: inv(IPC.createFolder),
+  renamePath: inv(IPC.renamePath),
+  deletePath: inv(IPC.deletePath),
+  duplicatePath: inv(IPC.duplicatePath),
+  revealPath: inv(IPC.revealPath),
+  copyPath: inv(IPC.copyPath),
+  getGraph: inv(IPC.getGraph),
+  search: inv(IPC.search),
+  getNoteInfo: inv(IPC.getNoteInfo),
+  listNotes: inv(IPC.listNotes),
+  readBoard: inv(IPC.readBoard),
+  writeBoard: inv(IPC.writeBoard),
+  pickImage: inv(IPC.pickImage),
+  readImage: inv(IPC.readImage),
+  openExternal: inv(IPC.openExternal),
+  addConnection: inv(IPC.addConnection),
+  removeConnection: inv(IPC.removeConnection),
+  onNoteCount: (cb) => on<NoteCount>(IPC.evNoteCount, cb),
+  onSystemTheme: (cb) => on<'light' | 'dark'>(IPC.evSystemTheme, cb),
+  onIndexChanged: (cb) => on<IndexStats>(IPC.evIndexChanged, cb),
+  onFsChanged: (cb) => on<FsChange>(IPC.evFsChanged, cb),
   platform: process.platform,
 };
 
