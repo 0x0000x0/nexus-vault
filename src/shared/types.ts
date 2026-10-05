@@ -11,6 +11,8 @@ export interface LayoutSettings {
   view: ViewMode;
   notePanelOpen: boolean;
   notePanelWidth: number;
+  graphNodeSize: number; // multiplier, 0.3..3
+  graphLinkWidth: number; // multiplier, 0.3..3
 }
 
 export type VaultMode = 'notes' | 'code';
@@ -82,6 +84,8 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   view: 'split',
   notePanelOpen: false,
   notePanelWidth: 380,
+  graphNodeSize: 1,
+  graphLinkWidth: 1,
 };
 
 export const LIMITS = {

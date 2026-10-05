@@ -77,6 +77,8 @@ export function normalizeSettings(raw: unknown): Settings {
       view: l.view === 'graph' || l.view === 'board' ? l.view : 'split',
       notePanelOpen: typeof l.notePanelOpen === 'boolean' ? l.notePanelOpen : DEFAULT_LAYOUT.notePanelOpen,
       notePanelWidth: clamp(l.notePanelWidth, LIMITS.noteMin, LIMITS.noteMax, DEFAULT_LAYOUT.notePanelWidth),
+      graphNodeSize: clamp(l.graphNodeSize, 0.3, 3, DEFAULT_LAYOUT.graphNodeSize),
+      graphLinkWidth: clamp(l.graphLinkWidth, 0.3, 3, DEFAULT_LAYOUT.graphLinkWidth),
     },
   };
 }
