@@ -117,6 +117,11 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
         <GraphIcon size={13} />
         <b>Graph</b> <span className="hcount">{app.graph.nodes.filter((n) => !n.ghost).length} notes · {app.graph.links.length} links</span>
         <div className="r">
+          <MaxBtn single={view === 'graph'} onMax={onMax} />
+        </div>
+      </div>
+      <div className="graphbg" ref={wrapRef} data-testid="graph-canvas">
+        <div className="gtools">
           <button className={`chipbtn${showLabels ? ' on' : ''}`} onClick={() => setShowLabels(!showLabels)} title="Show note names">
             Labels
           </button>
@@ -129,10 +134,7 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
           <button className="chipbtn" onClick={() => fgRef.current?.zoomToFit(400, 30)} title="Zoom to fit">
             Fit
           </button>
-          <MaxBtn single={view === 'graph'} onMax={onMax} />
         </div>
-      </div>
-      <div className="graphbg" ref={wrapRef} data-testid="graph-canvas">
         {folders.length > 0 && (
           <div className="legend">
             {folders.slice(0, 8).map((f) => (

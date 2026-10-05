@@ -670,7 +670,7 @@ export function BoardPane(p: Props) {
     const p2 = clipToRect(b, a.x + a.w / 2, a.y + a.h / 2);
     const on = selEdge === e.id;
     return (
-      <g key={e.id} className={`edge${e.link ? ' link' : ' board'}${on ? ' on' : ''}${e.pending ? ' pending' : ''}`}>
+      <g key={e.id} data-edge={e.id} data-ends={`${a.file ?? a.id}>${b.file ?? b.id}`} className={`edge${e.link ? ' link' : ' board'}${on ? ' on' : ''}${e.pending ? ' pending' : ''}`}>
         <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} className="vis" markerEnd={`url(#arrow${on ? '-on' : ''})`} />
         <line
           x1={p1.x}

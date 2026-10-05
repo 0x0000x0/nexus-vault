@@ -282,3 +282,5 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .status .ro { color: var(--c-blue); font-weight: 600; }
 .panehead .hcount { overflow: hidden; text-overflow: ellipsis; }
 .panehead .r { flex: none; }
+.gtools { position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; max-width: 60%; }
+.gtools .chipbtn { box-shadow: var(--shadow); }
