@@ -51,4 +51,9 @@ export interface NexusApi {
   onIndexChanged(cb: (s: IndexStats) => void): () => void;
   onFsChanged(cb: (c: FsChange) => void): () => void;
   platform: string;
+  // B: local semantic search (OFF by default)
+  semanticStatus(): Promise<import('./types').SemanticStatus>;
+  setSemantic(enabled: boolean): Promise<import('./types').SemanticStatus>;
+  semanticSearch(q: string): Promise<import('./types').SemanticHit[]>;
+  semanticRelated(rel: string): Promise<import('./types').SemanticHit[]>;
 }

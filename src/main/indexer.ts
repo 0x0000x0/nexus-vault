@@ -33,6 +33,8 @@ export class VaultIndex {
   private closed = false;
   version = 0;
   ready = false;
+  /** Optional per-note change hook (semantic index). null content = removed. */
+  onNote: ((rel: string, note: { title: string; content: string } | null) => void) | null = null;
 
   constructor(root: string, private onChange: (stats: IndexStats, fsChange: FsChange) => void) {
     this.root = root;
@@ -135,9 +137,12 @@ export class VaultIndex {
       if (kind === 'remove' || !(await this.load(rel))) {
         this.notes.delete(rel);
         namesChanged = namesChanged || had;
+        if (had) this.onNote?.(rel, null);
       } else {
         namesChanged = namesChanged || !had;
-        this.mini.add(this.doc(this.notes.get(rel)!));
+        const n = this.notes.get(rel)!;
+        this.mini.add(this.doc(n));
+        this.onNote?.(rel, { title: n.title, content: n.content });
       }
     }
     if (batch.length) {
@@ -268,6 +273,10 @@ export class VaultIndex {
 
   listNotes(): { rel: string; title: string }[] {
     return [...this.notes.values()].map((n) => ({ rel: n.rel, title: n.title }));
+  }
+
+  allNotes(): { rel: string; title: string; content: string }[] {
+    return [...this.notes.values()].map((n) => ({ rel: n.rel, title: n.title, content: n.content }));
   }
 
   noteInfo(rel: string): NoteInfo {

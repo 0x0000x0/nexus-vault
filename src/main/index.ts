@@ -2,7 +2,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, session, shell, type MenuItemConstructorOptions } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import { IPC, type BoardFile, type LayoutSettings, type RecentVaultView, type ThemePref, type VaultInfo } from '../shared/types';
+import { IPC, type BoardFile, type LayoutSettings, type RecentVaultView, type SemanticHit, type SemanticStatus, type ThemePref, type VaultInfo } from '../shared/types';
 import { VaultIndex } from './indexer';
 import { CodeIndex } from './codeindex';
 import { detectRepo, extractZip } from './repo';
@@ -13,6 +13,7 @@ import { resolveInVault } from './vault';
 import { flushSettings, getSettings, updateSettings } from './settings';
 import { countNotes, listDir, safeCopy } from './vault';
 import { isInside } from './pure';
+import { SemanticIndex } from './semantic';
 
 if (process.env.NEXUS_USER_DATA) app.setPath('userData', process.env.NEXUS_USER_DATA);
 
@@ -21,10 +22,12 @@ let win: BrowserWindow | null = null;
 let current: VaultInfo | null = null;
 let countToken = 0;
 let index: VaultIndex | CodeIndex | null = null;
+let semanticIdx: SemanticIndex | null = null;
 
 async function startIndex(): Promise<void> {
   await index?.close();
   index = null;
+  dropSemantic();
   if (!current) return;
   const onChange = (stats: import('../shared/types').IndexStats, fsChange: import('../shared/types').FsChange) => {
     if (index !== idx) return;
@@ -38,7 +41,31 @@ async function startIndex(): Promise<void> {
         })
       : new VaultIndex(current.path, onChange);
   index = idx;
-  idx.start().catch((e) => console.error('[index] failed', e));
+  idx
+    .start()
+    .then(() => {
+      if (index === idx && getSettings().semanticSearch) buildSemantic();
+    })
+    .catch((e) => console.error('[index] failed', e));
+}
+
+// ---------- B: semantic search (only built when settings.semanticSearch is on; zero cost otherwise) ----------
+const SEM_MIN = 0.05;
+function buildSemantic(): void {
+  dropSemantic();
+  if (!(index instanceof VaultIndex)) return;
+  const s = new SemanticIndex();
+  for (const n of index.allNotes()) s.upsert(n.rel, n.title, n.content);
+  index.onNote = (rel, n) => (n ? s.upsert(rel, n.title, n.content) : s.remove(rel));
+  semanticIdx = s;
+}
+function dropSemantic(): void {
+  if (index instanceof VaultIndex) index.onNote = null;
+  semanticIdx?.close();
+  semanticIdx = null;
+}
+function semanticStatus(): SemanticStatus {
+  return { enabled: getSettings().semanticSearch, indexed: semanticIdx?.size() ?? 0 };
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -250,6 +277,16 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.getGraph, () => index?.graph() ?? { nodes: [], links: [], version: -1 });
   ipcMain.handle(IPC.search, (_e, q: string) => index?.search(q) ?? []);
+  ipcMain.handle(IPC.semanticStatus, () => semanticStatus());
+  ipcMain.handle(IPC.setSemantic, (_e, enabled: boolean) => {
+    updateSettings({ semanticSearch: enabled === true });
+    if (enabled === true) {
+      if (!semanticIdx && index instanceof VaultIndex && index.ready) buildSemantic();
+    } else dropSemantic();
+    return semanticStatus();
+  });
+  ipcMain.handle(IPC.semanticSearch, (_e, q: string): SemanticHit[] => (semanticIdx && typeof q === 'string' && q.trim() ? semanticIdx.search(q, 20, SEM_MIN) : []));
+  ipcMain.handle(IPC.semanticRelated, (_e, rel: string): SemanticHit[] => (semanticIdx && typeof rel === 'string' ? semanticIdx.related(rel, 5, SEM_MIN) : []));
   ipcMain.handle(IPC.getNoteInfo, (_e, rel: string) => index?.noteInfo(rel) ?? null);
   ipcMain.handle('index:links', () => index?.links() ?? []);
   ipcMain.handle(IPC.previews, (_e, rels: string[]) => index?.previews(rels) ?? {});

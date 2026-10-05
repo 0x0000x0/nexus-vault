@@ -44,6 +44,7 @@ export interface Settings {
   lastVaultPath?: string;
   windowBounds?: WindowBounds;
   layout: LayoutSettings;
+  semanticSearch: boolean;
 }
 
 export interface VaultInfo {
@@ -140,6 +141,10 @@ export const IPC = {
   evIndexChanged: 'ev:index-changed',
   evFsChanged: 'ev:fs-changed',
   evProgress: 'ev:progress',
+  semanticStatus: 'semantic:status',
+  setSemantic: 'semantic:set-enabled',
+  semanticSearch: 'semantic:search',
+  semanticRelated: 'semantic:related',
 } as const;
 
 // ---------- M1: index / graph / notes ----------
@@ -159,6 +164,17 @@ export interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];
   version: number;
+}
+/** Semantic (local embedding) hit; also used as a citation source. */
+export interface SemanticHit {
+  rel: string;
+  title: string;
+  snippet: string;
+  score: number;
+}
+export interface SemanticStatus {
+  enabled: boolean;
+  indexed: number;
 }
 export interface SearchHit {
   rel: string;

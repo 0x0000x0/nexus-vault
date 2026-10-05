@@ -2,7 +2,7 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FsChange, NoteFile, NoteInfo } from '../../../shared/types';
+import type { FsChange, NoteFile, NoteInfo, SemanticHit } from '../../../shared/types';
 import { baseName, errMsg, noteTitle, useApp } from '../ctx';
 import { highlight } from '../highlight';
 
@@ -42,6 +42,7 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
   const [err, setErr] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [external, setExternal] = useState(false);
+  const [related, setRelated] = useState<SemanticHit[] | null>(null); // null = semantic off
   const dirty = !!file && text !== file.content;
   const stateRef = useRef({ file, text, dirty });
   stateRef.current = { file, text, dirty };
@@ -117,6 +118,26 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
       live = false;
     };
   }, [rel, app.indexVersion]);
+
+  // Related notes (semantic, only when enabled in settings).
+  useEffect(() => {
+    if (!rel || readOnly) {
+      setRelated(null);
+      return;
+    }
+    let live = true;
+    void window.nexus
+      .semanticStatus()
+      .then(async (s) => {
+        if (!s.enabled) return live && setRelated(null);
+        const r = await window.nexus.semanticRelated(rel);
+        if (live) setRelated(r);
+      })
+      .catch(() => live && setRelated(null));
+    return () => {
+      live = false;
+    };
+  }, [rel, readOnly, app.indexVersion]);
 
   // External edits (Obsidian, Explorer) reload the note if we have no unsaved changes.
   useEffect(
@@ -265,6 +286,21 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
                 </div>
               ))}
             </details>
+            {related && (
+              <details open data-testid="related-notes">
+                <summary>Related notes ({related.length})</summary>
+                {related.length ? (
+                  related.map((r) => (
+                    <div key={r.rel} className="bl" onClick={() => app.openNote(r.rel)} title={`${r.rel} · similarity ${Math.round(r.score * 100)}%`}>
+                      <div className="blt">{r.title}</div>
+                      {r.snippet && <div className="blc">{r.snippet}</div>}
+                    </div>
+                  ))
+                ) : (
+                  <div className="muted">No similar notes found.</div>
+                )}
+              </details>
+            )}
             {!!info?.tags.length && (
               <div className="tags">
                 {info.tags.map((t) => (

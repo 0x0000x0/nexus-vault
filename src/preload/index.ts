@@ -57,6 +57,10 @@ const api: NexusApi = {
   onSystemTheme: (cb) => on<'light' | 'dark'>(IPC.evSystemTheme, cb),
   onIndexChanged: (cb) => on<IndexStats>(IPC.evIndexChanged, cb),
   onFsChanged: (cb) => on<FsChange>(IPC.evFsChanged, cb),
+  semanticStatus: inv(IPC.semanticStatus),
+  setSemantic: inv(IPC.setSemantic),
+  semanticSearch: inv(IPC.semanticSearch),
+  semanticRelated: inv(IPC.semanticRelated),
   platform: process.platform,
 };
 
