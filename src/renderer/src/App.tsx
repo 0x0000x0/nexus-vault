@@ -11,6 +11,7 @@ import { QuickSearch } from './components/QuickSearch';
 import { RepoDrop } from './components/RepoDrop';
 import { StatusBar } from './components/StatusBar';
 import { TitleBar } from './components/TitleBar';
+import { AiAccess } from './components/AiAccess';
 import { ToolStrip } from './components/ToolStrip';
 import { VaultPicker } from './components/VaultPicker';
 import { Ctx, dirOf, errMsg, type AppActions } from './ctx';
@@ -44,6 +45,7 @@ export function App() {
   const [boardKey, setBoardKey] = useState(0);
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [quick, setQuick] = useState(false);
+  const [isAiAccessOpen, setIsAiAccessOpen] = useState(false);
   const [repoDrop, setRepoDrop] = useState(false);
   const [prog, setProg] = useState<ProgressInfo | null>(null);
   const [files, setFiles] = useState<Set<string>>(new Set());
@@ -458,6 +460,7 @@ export function App() {
         onMenuOpen={() => void refreshRecent()}
         onSearch={() => setQuick(true)}
         onOpenCode={() => setRepoDrop(true)}
+        onAiAccess={() => setIsAiAccessOpen(true)}
       />
       <div className="body">
         {!vault && banner && (
@@ -543,6 +546,9 @@ export function App() {
           </Ctx.Provider>
         )}
         {prompt && <PromptModal p={prompt} onDone={() => setPrompt(null)} />}
+
+        {isAiAccessOpen && <AiAccess onClose={() => setIsAiAccessOpen(false)} />}
+
         {repoDrop && <RepoDrop recent={recent} busy={!!busy || !!prog} onOpen={(p) => void openCode(p)} onOpenRecent={(p) => void openRecent(p).then(() => setRepoDrop(false))} onClose={() => setRepoDrop(false)} />}
         {prog && (
           <div className="progress" data-testid="progress">

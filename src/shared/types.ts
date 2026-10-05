@@ -45,6 +45,12 @@ export interface Settings {
   windowBounds?: WindowBounds;
   layout: LayoutSettings;
   semanticSearch: boolean;
+  mcp: {
+    enabled: boolean;
+    port: number;
+    token: string;
+    readOnly: boolean;
+  };
 }
 
 export interface VaultInfo {

@@ -3,6 +3,8 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, sess
 import fs from 'node:fs';
 import path from 'node:path';
 import { IPC, type BoardFile, type LayoutSettings, type RecentVaultView, type SemanticHit, type SemanticStatus, type ThemePref, type VaultInfo } from '../shared/types';
+import { startMcp, stopMcp, mcpStatus, newToken } from './mcp';
+import { type McpBackend } from './mcp-core';
 import { VaultIndex } from './indexer';
 import { CodeIndex } from './codeindex';
 import { detectRepo, extractZip } from './repo';
@@ -23,6 +25,39 @@ let current: VaultInfo | null = null;
 let countToken = 0;
 let index: VaultIndex | CodeIndex | null = null;
 let semanticIdx: SemanticIndex | null = null;
+let mcpStarted = false;
+
+const backendFactory = (): McpBackend => {
+  const root = current?.path ?? '';
+  return {
+    search: (q, limit) =>
+      (index?.search(q, limit) ?? []).map((h) => ({
+        rel: h.rel,
+        title: h.title,
+        folder: h.folder,
+        snippet: h.snippet,
+        score: h.score,
+      })),
+    listNotes: () => index?.listNotes() ?? [],
+    readNote: async (rel) => (await ops.readNote(root, rel)).content,
+    backlinks: (rel) =>
+      (index?.noteInfo(rel)?.backlinks ?? []).map((b) => ({
+        rel: b.rel,
+        title: b.title,
+        context: b.context || '',
+      })),
+    appendNote: async (rel, text) => {
+      if (!current || current.readOnly) throw new Error('Vault is read-only');
+      const nf = await ops.readNote(root, rel);
+      await ops.writeNote(root, rel, nf.content + '\n' + text);
+    },
+    createNote: async (dir, name, content) => {
+      if (!current || current.readOnly) throw new Error('Vault is read-only');
+      return ops.createNote(root, dir, name, content);
+    },
+  };
+};
+
 
 async function startIndex(): Promise<void> {
   await index?.close();
@@ -201,6 +236,70 @@ function registerIpc(): void {
     return current;
   });
   ipcMain.handle(IPC.listDir, (_e, root: string, rel: string) => listDir(requireVault(root), rel));
+
+  ipcMain.handle('mcp:status', () => {
+    const s = getSettings().mcp;
+    const st = mcpStatus();
+    return {
+      enabled: s.enabled,
+      running: st.running,
+      port: s.port,
+      readOnly: s.readOnly,
+      token: s.token,
+      url: `http://127.0.0.1:${s.port}/mcp`,
+      error: st.error,
+    };
+  });
+  ipcMain.handle('mcp:set', async (_e, patch: { enabled?: boolean; readOnly?: boolean; port?: number }) => {
+    const s = getSettings();
+    let token = s.mcp.token;
+    const enabled = patch.enabled !== undefined ? !!patch.enabled : s.mcp.enabled;
+    if (enabled && !token) token = newToken();
+    const ps = {
+      enabled,
+      port: patch.port !== undefined ? Math.max(1024, Math.min(65535, Number(patch.port) || 27124)) : s.mcp.port,
+      token,
+      readOnly: patch.readOnly !== undefined ? !!patch.readOnly : s.mcp.readOnly,
+    };
+    updateSettings({ mcp: ps });
+    stopMcp();
+    mcpStarted = false;
+    if (ps.enabled) {
+      startMcp(backendFactory, ps);
+      mcpStarted = true;
+    }
+    const st = mcpStatus();
+    return {
+      enabled: ps.enabled,
+      running: st.running,
+      port: ps.port,
+      readOnly: ps.readOnly,
+      token: ps.token,
+      url: `http://127.0.0.1:${ps.port}/mcp`,
+      error: st.error,
+    };
+  });
+  ipcMain.handle('mcp:regen-token', () => {
+    const s = getSettings();
+    const token = newToken();
+    const ps = { ...s.mcp, token };
+    updateSettings({ mcp: ps });
+    if (ps.enabled) {
+      stopMcp();
+      startMcp(backendFactory, ps);
+      mcpStarted = true;
+    }
+    const st = mcpStatus();
+    return {
+      enabled: ps.enabled,
+      running: st.running,
+      port: ps.port,
+      readOnly: ps.readOnly,
+      token: ps.token,
+      url: `http://127.0.0.1:${ps.port}/mcp`,
+      error: st.error,
+    };
+  });
 
   // ---- M1/M2: notes, file ops, index, board
   const v = () => {
@@ -479,6 +578,14 @@ app.whenReady().then(async () => {
   nativeTheme.on('updated', () => win?.webContents.send(IPC.evSystemTheme, nativeTheme.shouldUseDarkColors ? 'dark' : 'light'));
   lockDownNetwork();
   registerIpc();
+  app.on('will-quit', () => { stopMcp(); mcpStarted = false; });
+  if (getSettings().mcp.enabled) {
+    const s = getSettings().mcp;
+    const token = s.token || newToken();
+    if (!s.token) updateSettings({ mcp: { ...s, token } });
+    startMcp(backendFactory, { ...getSettings().mcp, token });
+    mcpStarted = true;
+  }
   buildMenu();
   const startPath = process.env.NEXUS_VAULT_OPEN || getSettings().lastVaultPath;
   if (startPath && fs.existsSync(startPath)) {
