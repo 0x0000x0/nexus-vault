@@ -75,6 +75,8 @@ export function normalizeSettings(raw: unknown): Settings {
       paneRatio: clamp(l.paneRatio, 0.1, 0.9, DEFAULT_LAYOUT.paneRatio),
       paneOrder: l.paneOrder === 'graph-board' ? 'graph-board' : 'board-graph',
       view: l.view === 'graph' || l.view === 'board' ? l.view : 'split',
+      notePanelOpen: typeof l.notePanelOpen === 'boolean' ? l.notePanelOpen : DEFAULT_LAYOUT.notePanelOpen,
+      notePanelWidth: clamp(l.notePanelWidth, LIMITS.noteMin, LIMITS.noteMax, DEFAULT_LAYOUT.notePanelWidth),
     },
   };
 }
