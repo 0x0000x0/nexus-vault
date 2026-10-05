@@ -219,6 +219,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.getGraph, () => index?.graph() ?? { nodes: [], links: [], version: -1 });
   ipcMain.handle(IPC.search, (_e, q: string) => index?.search(q) ?? []);
   ipcMain.handle(IPC.getNoteInfo, (_e, rel: string) => index?.noteInfo(rel) ?? null);
+  ipcMain.handle(IPC.previews, (_e, rels: string[]) => index?.previews(rels) ?? {});
   ipcMain.handle(IPC.listNotes, () => ({ notes: index?.listNotes() ?? [], stats: index?.stats() ?? null, ready: !!index?.ready }));
   ipcMain.handle(IPC.readBoard, () => ops.readBoard(v()));
   ipcMain.handle(IPC.writeBoard, (_e, data: BoardFile) => ops.writeBoard(v(), data));

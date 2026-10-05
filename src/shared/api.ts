@@ -28,6 +28,7 @@ export interface NexusApi {
   getGraph(): Promise<GraphData>;
   search(q: string): Promise<SearchHit[]>;
   getNoteInfo(rel: string): Promise<NoteInfo | null>;
+  previews(rels: string[]): Promise<Record<string, { preview: string; tags: string[] }>>;
   listNotes(): Promise<{ notes: { rel: string; title: string }[]; stats: IndexStats | null; ready: boolean }>;
   // board
   readBoard(): Promise<BoardFile>;

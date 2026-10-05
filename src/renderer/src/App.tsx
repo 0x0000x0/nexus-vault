@@ -1,21 +1,22 @@
-// Root component: theme, layout persistence, vault actions (Grok Bot).
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { DEFAULT_LAYOUT, LIMITS, type LayoutSettings, type RecentVaultView, type ThemePref, type VaultInfo, type ViewMode } from '../../shared/types';
+// Root component: theme, layout persistence, vault actions, index state (Grok Bot).
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DEFAULT_LAYOUT, LIMITS, type GraphData, type IndexStats, type LayoutSettings, type RecentVaultView, type ThemePref, type VaultInfo, type ViewMode } from '../../shared/types';
+import { BoardPane, type ToolId } from './components/BoardPane';
+import { PromptModal, type PromptState } from './components/ContextMenu';
 import { Divider } from './components/Divider';
 import { FolderTree } from './components/FolderTree';
-import { BoardPane, GraphPane } from './components/Panes';
+import { GraphPane } from './components/GraphPane';
+import { NotePanel } from './components/NotePanel';
+import { QuickSearch } from './components/QuickSearch';
 import { StatusBar } from './components/StatusBar';
 import { TitleBar } from './components/TitleBar';
 import { ToolStrip } from './components/ToolStrip';
 import { VaultPicker } from './components/VaultPicker';
+import { Ctx, dirOf, errMsg, type AppActions } from './ctx';
 
 const nexus = window.nexus;
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
-
-function errMsg(e: unknown): string {
-  const m = String((e as Error)?.message ?? e);
-  return m.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
-}
+const EMPTY_GRAPH: GraphData = { nodes: [], links: [], version: -1 };
 
 export function App() {
   const [ready, setReady] = useState(false);
@@ -28,8 +29,24 @@ export function App() {
   const [noteCount, setNoteCount] = useState<{ count: number; done: boolean } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ text: string; err?: boolean } | null>(null);
+  const [graph, setGraph] = useState<GraphData>(EMPTY_GRAPH);
+  const [stats, setStats] = useState<IndexStats | null>(null);
+  const [openRel, setOpenRel] = useState<string | null>(null);
+  const [editReq, setEditReq] = useState(0);
+  const [boardFolder, setBoardFolder] = useState('');
+  const [toolReq, setToolReq] = useState<{ tool: ToolId; n: number } | null>(null);
+  const [lineMode, setLineMode] = useState(false);
+  const [graphFocus, setGraphFocus] = useState<{ rel: string; n: number } | null>(null);
+  const [boardFocus, setBoardFocus] = useState<{ rel: string; n: number } | null>(null);
+  const [treeReveal, setTreeReveal] = useState<{ rel: string; n: number } | null>(null);
+  const [boardKey, setBoardKey] = useState(0);
+  const [prompt, setPrompt] = useState<PromptState | null>(null);
+  const [quick, setQuick] = useState(false);
   const mainRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef(0);
+  const bannerTimer = useRef<number | null>(null);
+  const counter = useRef(0);
+  const next = () => ++counter.current;
 
   // ---- startup
   useEffect(() => {
@@ -43,14 +60,34 @@ export function App() {
     })();
     const offCount = nexus.onNoteCount((n) => setNoteCount({ count: n.count, done: n.done }));
     const offTheme = nexus.onSystemTheme(() => setSystemDark(darkQuery.matches));
+    const offIndex = nexus.onIndexChanged((s) => {
+      setStats(s);
+      void nexus.getGraph().then(setGraph);
+    });
     const mq = () => setSystemDark(darkQuery.matches);
     darkQuery.addEventListener('change', mq);
     return () => {
       offCount();
       offTheme();
+      offIndex();
       darkQuery.removeEventListener('change', mq);
     };
   }, []);
+
+  // Fetch the graph whenever a vault becomes active (index may already be ready).
+  useEffect(() => {
+    setGraph(EMPTY_GRAPH);
+    setStats(null);
+    setOpenRel(null);
+    setBoardFolder('');
+    if (!vault) return;
+    void nexus.listNotes().then((r) => {
+      if (r.ready) {
+        setStats(r.stats);
+        void nexus.getGraph().then(setGraph);
+      }
+    });
+  }, [vault?.path]);
 
   // ---- theme
   const resolved = theme === 'system' ? (systemDark ? 'dark' : 'light') : theme;
@@ -68,6 +105,26 @@ export function App() {
     setLayoutState((l) => ({ ...l, ...patch }));
     if (persist) void nexus.setLayout(patch);
   }, []);
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+
+  const notify = useCallback((text: string, err?: boolean) => {
+    setBanner({ text, err });
+    if (bannerTimer.current) window.clearTimeout(bannerTimer.current);
+    bannerTimer.current = window.setTimeout(() => setBanner(null), err ? 9000 : 4500);
+  }, []);
+
+  // ---- global keys
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && vault) {
+        e.preventDefault();
+        setQuick((q) => !q);
+      }
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [vault]);
 
   // ---- vault actions
   const refreshRecent = async () => setRecent(await nexus.getRecent());
@@ -92,7 +149,7 @@ export function App() {
     run(`Copying ${src} …`, async () => {
       const v = await nexus.safeCopy(src);
       await afterOpen(v);
-      setBanner({ text: `Safe copy created at ${v.path}` });
+      notify(`Safe copy created at ${v.path}`);
     });
   const openCopy = async () => {
     const src = await nexus.pickFolder('Choose a vault to copy');
@@ -117,6 +174,82 @@ export function App() {
     await refreshRecent();
   };
 
+  // ---- actions shared via context
+  const ask = useCallback<AppActions['ask']>(
+    (title, initial = '', opts) => new Promise((resolve) => setPrompt({ title, initial, ...opts, resolve })),
+    [],
+  );
+  const ensureVisible = (pane: 'graph' | 'board') => {
+    const l = layoutRef.current;
+    if (l.view !== 'split' && l.view !== pane) setLayout({ view: 'split' });
+  };
+  const actions: AppActions | null = useMemo(() => {
+    if (!vault) return null;
+    return {
+      vault,
+      graph,
+      indexVersion: stats?.version ?? 0,
+      ask,
+      notify,
+      openNote: (rel, opts) => {
+        setOpenRel(rel);
+        setSelected(rel);
+        setTreeReveal({ rel, n: next() });
+        if (opts?.edit) setEditReq(next());
+        if (!layoutRef.current.notePanelOpen) setLayout({ notePanelOpen: true });
+      },
+      select: (rel) => setSelected(rel),
+      showInGraph: (rel) => {
+        ensureVisible('graph');
+        setSelected(rel);
+        setGraphFocus({ rel, n: next() });
+      },
+      openOnBoard: (rel, kind) => {
+        ensureVisible('board');
+        if (kind === 'folder') setBoardFolder(rel);
+        else setBoardFolder(dirOf(rel));
+        setBoardFocus({ rel, n: next() });
+      },
+      newNote: async (dir) => {
+        const name = await ask('New note', 'Untitled', { okLabel: 'Create' });
+        if (!name) return null;
+        try {
+          const rel = await nexus.createNote(dir, name, `# ${name.replace(/\.md$/i, '')}\n\n`);
+          setOpenRel(rel);
+          setSelected(rel);
+          setEditReq(next());
+          if (!layoutRef.current.notePanelOpen) setLayout({ notePanelOpen: true });
+          return rel;
+        } catch (e) {
+          notify(errMsg(e), true);
+          return null;
+        }
+      },
+      newFolder: async (dir) => {
+        const name = await ask('New folder', 'New folder', { okLabel: 'Create' });
+        if (!name) return null;
+        try {
+          return await nexus.createFolder(dir, name);
+        } catch (e) {
+          notify(errMsg(e), true);
+          return null;
+        }
+      },
+      renamed: (oldRel, newRel) => {
+        const fix = (p: string) => (p === oldRel ? newRel : p.startsWith(oldRel + '/') ? newRel + p.slice(oldRel.length) : p);
+        setOpenRel((o) => (o ? fix(o) : o));
+        setBoardFolder((f) => fix(f));
+        setBoardKey((k) => k + 1);
+      },
+      deleted: (rel) => {
+        setOpenRel((o) => (o && (o === rel || o.startsWith(rel + '/')) ? null : o));
+        setBoardFolder((f) => (f === rel || f.startsWith(rel + '/') ? dirOf(rel) : f));
+        setSelected(null);
+      },
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vault, graph, stats?.version, ask, notify]);
+
   if (!ready) return <div className="app" />;
 
   const countText = noteCount ? `${noteCount.count.toLocaleString()} notes${noteCount.done ? '' : ' (counting…)'}` : 'counting…';
@@ -124,16 +257,35 @@ export function App() {
   const swap = () => setLayout({ paneOrder: layout.paneOrder === 'board-graph' ? 'graph-board' : 'board-graph' });
   const maxToggle = (pane: ViewMode) => () => setLayout({ view: layout.view === pane ? 'split' : pane });
 
-  const paneProps = { vaultName: vault?.name ?? '', view: layout.view, selected, noteCount: countText };
-  const board = <BoardPane {...paneProps} onMax={maxToggle('board')} />;
-  const graph = <GraphPane {...paneProps} onMax={maxToggle('graph')} />;
-  const [left, right] = layout.paneOrder === 'board-graph' ? [board, graph] : [graph, board];
+  const board = (
+    <BoardPane
+      key={`${vault?.path}:${boardKey}`}
+      view={layout.view}
+      onMax={maxToggle('board')}
+      folder={boardFolder}
+      setFolder={setBoardFolder}
+      toolReq={toolReq}
+      lineMode={lineMode}
+      setLineMode={setLineMode}
+      focus={boardFocus}
+      selectedRel={selected}
+    />
+  );
+  const graphPane = <GraphPane view={layout.view} onMax={maxToggle('graph')} dark={resolved === 'dark'} selected={selected} focus={graphFocus} />;
+  const [left, right] = layout.paneOrder === 'board-graph' ? [board, graphPane] : [graphPane, board];
 
   const mainWidth = () => mainRef.current?.clientWidth ?? 1000;
   const clampRatio = (r: number) => {
     const w = mainWidth() - 7;
     const min = Math.min(0.5, LIMITS.paneMin / Math.max(1, w));
     return Math.min(1 - min, Math.max(min, r));
+  };
+  const clampNote = (w: number) => Math.min(LIMITS.noteMax, Math.max(LIMITS.noteMin, w));
+
+  const onTool = (t: ToolId) => {
+    if (layout.view === 'graph') setLayout({ view: 'split' });
+    if (t === 'line') setLineMode(!lineMode);
+    else setToolReq({ tool: t, n: next() });
   };
 
   return (
@@ -152,6 +304,7 @@ export function App() {
         onOpenReal={() => void openReal()}
         onClose={() => void closeVault()}
         onMenuOpen={() => void refreshRecent()}
+        onSearch={() => setQuick(true)}
       />
       <div className="body">
         {!vault && banner && (
@@ -160,11 +313,11 @@ export function App() {
             <button onClick={() => setBanner(null)} title="Dismiss">✕</button>
           </div>
         )}
-        {!vault ? (
+        {!vault || !actions ? (
           <VaultPicker recent={recent} busy={busy} onOpenCopy={() => void openCopy()} onOpenReal={() => void openReal()} onOpenRecent={(p) => void openRecent(p)} onRemove={(p) => void removeRecent(p)} />
         ) : (
-          <>
-            <FolderTree vault={vault} width={layout.treeWidth} selected={selected} onSelect={(rel) => setSelected(rel)} />
+          <Ctx.Provider value={actions}>
+            <FolderTree vault={vault} width={layout.treeWidth} selected={selected} openRel={openRel} onSelect={(rel) => setSelected(rel)} reveal={treeReveal} />
             <Divider
               testId="div-tree"
               onStart={() => (dragStart.current = layout.treeWidth)}
@@ -172,7 +325,7 @@ export function App() {
               onEnd={(dx) => setLayout({ treeWidth: Math.min(LIMITS.treeMax, Math.max(LIMITS.treeMin, dragStart.current + dx)) })}
               onReset={() => setLayout({ treeWidth: DEFAULT_LAYOUT.treeWidth })}
             />
-            <ToolStrip expanded={layout.toolStripExpanded} width={toolWidth} />
+            <ToolStrip expanded={layout.toolStripExpanded} width={toolWidth} lineMode={lineMode} onTool={onTool} />
             <Divider
               thin
               testId="div-tools"
@@ -205,13 +358,40 @@ export function App() {
                   <div style={{ flex: '1 1 0', display: 'flex', minWidth: 0 }}>{right}</div>
                 </>
               ) : (
-                <div style={{ flex: 1, display: 'flex', minWidth: 0 }}>{layout.view === 'board' ? board : graph}</div>
+                <div style={{ flex: 1, display: 'flex', minWidth: 0 }}>{layout.view === 'board' ? board : graphPane}</div>
               )}
             </div>
-          </>
+            {layout.notePanelOpen ? (
+              <>
+                <Divider
+                  testId="div-note"
+                  onStart={() => (dragStart.current = layout.notePanelWidth)}
+                  onDrag={(dx) => setLayout({ notePanelWidth: clampNote(dragStart.current - dx) }, false)}
+                  onEnd={(dx) => setLayout({ notePanelWidth: clampNote(dragStart.current - dx) })}
+                  onReset={() => setLayout({ notePanelWidth: DEFAULT_LAYOUT.notePanelWidth })}
+                />
+                <NotePanel rel={openRel} editRequest={editReq} width={layout.notePanelWidth} onClose={() => setLayout({ notePanelOpen: false })} />
+              </>
+            ) : (
+              <button className="npopen" title="Show note panel" onClick={() => setLayout({ notePanelOpen: true })}>
+                ‹ Note
+              </button>
+            )}
+            {quick && (
+              <QuickSearch
+                onClose={() => setQuick(false)}
+                onPick={(rel) => {
+                  setQuick(false);
+                  actions.openNote(rel);
+                  setGraphFocus({ rel, n: next() });
+                }}
+              />
+            )}
+          </Ctx.Provider>
         )}
+        {prompt && <PromptModal p={prompt} onDone={() => setPrompt(null)} />}
       </div>
-      <StatusBar selected={selected} noteCount={countText} hasVault={!!vault} />
+      <StatusBar selected={selected} noteCount={countText} vault={vault} stats={stats} />
     </div>
   );
 }

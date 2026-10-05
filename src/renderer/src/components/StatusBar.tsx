@@ -1,16 +1,25 @@
 // Status bar (Grok Bot).
 import pkg from '../../../../package.json';
-export function StatusBar({ selected, noteCount, hasVault }: { selected: string | null; noteCount: string; hasVault: boolean }) {
+import type { IndexStats, VaultInfo } from '../../../shared/types';
+
+export function StatusBar({ selected, noteCount, vault, stats, readOnly }: { selected: string | null; noteCount: string; vault: VaultInfo | null; stats: IndexStats | null; readOnly?: boolean }) {
   return (
     <footer className="status">
       <span>
         <span className="dot" />
         Local only · No account · Offline
       </span>
-      <span>Read-only (M0)</span>
+      {vault &&
+        (readOnly ? (
+          <span className="ro" title="Nothing inside this folder is ever modified. Board layout is stored in the app's own data folder.">Read-only repo</span>
+        ) : vault.isCopy ? (
+          <span title="Edits go to the safe copy; every write is backed up in .nexus-backups">Editing safe copy · backups on</span>
+        ) : (
+          <span className="warn" title="You opened the real vault. Every write is backed up in .nexus-backups">Editing REAL vault · backups on</span>
+        ))}
       {selected && <span title={selected}>{selected}</span>}
       <div className="r">
-        {hasVault && <span>{noteCount}</span>}
+        {vault && <span>{stats && stats.version > 0 ? `${stats.notes.toLocaleString()} ${readOnly ? 'files' : 'notes'} · ${stats.links.toLocaleString()} links` : noteCount}</span>}
         <span>Nexus Vault {pkg.version}</span>
       </div>
     </footer>

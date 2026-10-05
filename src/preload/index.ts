@@ -40,6 +40,7 @@ const api: NexusApi = {
   search: inv(IPC.search),
   getNoteInfo: inv(IPC.getNoteInfo),
   listNotes: inv(IPC.listNotes),
+  previews: inv(IPC.previews),
   readBoard: inv(IPC.readBoard),
   writeBoard: inv(IPC.writeBoard),
   pickImage: inv(IPC.pickImage),

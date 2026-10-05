@@ -52,5 +52,6 @@ export const ToolIcons: Record<string, () => JSX.Element> = {
   Image: () => <S><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 17l-5-5-9 8" /></S>,
   'To-do': () => <S><rect x="3" y="4" width="6" height="6" rx="1" /><path d="M4.5 7l1.2 1.2L8 6M12 7h9M3 16h6M12 16h9" /></S>,
   Column: () => <S><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h8" /></S>,
+  Globe: () => <S><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></S>,
   Sketch: () => <S><path d="M3 21l3-1 11-11-2-2L4 18zM14 6l2-2 4 4-2 2" /></S>,
 };

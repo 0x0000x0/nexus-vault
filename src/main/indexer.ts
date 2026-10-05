@@ -250,6 +250,15 @@ export class VaultIndex {
     });
   }
 
+  previews(rels: string[]): Record<string, { preview: string; tags: string[] }> {
+    const out: Record<string, { preview: string; tags: string[] }> = {};
+    for (const r of rels) {
+      const n = this.notes.get(r);
+      if (n) out[r] = { preview: previewText(n.content), tags: n.parsed.tags.slice(0, 4) };
+    }
+    return out;
+  }
+
   listNotes(): { rel: string; title: string }[] {
     return [...this.notes.values()].map((n) => ({ rel: n.rel, title: n.title }));
   }
@@ -299,4 +308,15 @@ function snippet(content: string, terms: string[]): string {
   const start = Math.max(0, at < 0 ? 0 : at - 50);
   const s = content.slice(start, start + 160).replace(/\s+/g, ' ').trim();
   return (start > 0 ? '…' : '') + s;
+}
+
+/** Plain-text preview of a note: drop frontmatter, headings markers, link brackets, markup. */
+export function previewText(content: string): string {
+  let s = content.replace(/^---\r?\n[\s\S]*?\r?\n---\s*\n?/, '');
+  s = s.replace(/```[\s\S]*?```/g, ' ');
+  s = s.replace(/!\[\[[^\]]*\]\]/g, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '');
+  s = s.replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, '$2').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+  s = s.replace(/^#{1,6}\s+/gm, '').replace(/^\s*[-*+]\s+\[[ xX]\]\s*/gm, '☐ ').replace(/^\s*[-*+]\s+/gm, '• ');
+  s = s.replace(/[*_`>~]/g, '');
+  return s.replace(/\n{2,}/g, '\n').trim().slice(0, 280);
 }

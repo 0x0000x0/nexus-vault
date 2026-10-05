@@ -17,6 +17,7 @@ interface Props {
   onOpenReal: () => void;
   onClose: () => void;
   onMenuOpen: () => void;
+  onSearch: () => void;
 }
 
 export function TitleBar(p: Props) {
@@ -110,9 +111,9 @@ export function TitleBar(p: Props) {
       <button className="iconbtn" title={`Swap panes (now: ${p.paneOrder === 'board-graph' ? 'Board left, Graph right' : 'Graph left, Board right'})`} onClick={p.onSwap} disabled={!p.vault}>
         <SwapIcon />
       </button>
-      <div className="search" title="Search is coming in a later milestone" aria-disabled="true">
-        <SearchIcon /> Search (coming soon) <span className="kbd">Ctrl K</span>
-      </div>
+      <button className="search" title="Search notes (Ctrl+K)" onClick={p.onSearch} disabled={!p.vault}>
+        <SearchIcon /> Search notes… <span className="kbd">Ctrl K</span>
+      </button>
       <div className="spacer" />
       <div className="seg" role="group" aria-label="Theme">
         <button className={p.theme === 'light' ? 'on' : ''} onClick={() => p.onTheme('light')}>

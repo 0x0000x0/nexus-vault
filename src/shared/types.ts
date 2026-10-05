@@ -107,6 +107,7 @@ export const IPC = {
   search: 'index:search',
   getNoteInfo: 'index:note-info',
   listNotes: 'index:list-notes',
+  previews: 'index:previews',
   readBoard: 'board:read',
   writeBoard: 'board:write',
   pickImage: 'board:pick-image',
