@@ -7,6 +7,16 @@ import { startMcp, stopMcp, mcpStatus, newToken } from './mcp';
 import { type McpBackend } from './mcp-core';
 import { type MemoryPacks, type MemoryPolicy, emptyPacks, setPolicy } from '../shared/memory-packs';
 import * as memoryStore from './memory-store';
+import {
+  createSnapshot,
+  createSnapshotWithOptions,
+  listSnapshots,
+  listSnapshotsFromDir,
+  restoreSnapshot,
+  restoreSnapshotWithOptions,
+  deleteSnapshot,
+  deleteSnapshotFromDir,
+} from './snapshots';
 import { VaultIndex } from './indexer';
 import { CodeIndex } from './codeindex';
 import { detectRepo, extractZip } from './repo';
@@ -315,6 +325,59 @@ function registerIpc(): void {
       url: `http://127.0.0.1:${ps.port}/mcp`,
       error: st.error,
     };
+  });
+
+  ipcMain.handle(IPC.snapList, async () => {
+    if (!current) return [];
+    if (current.readOnly) {
+      const h = crypto.createHash('sha1').update(current.path.toLowerCase()).digest('hex');
+      return listSnapshotsFromDir(path.join(app.getPath('userData'), 'snapshots', h));
+    }
+    return listSnapshots(current.path);
+  });
+  ipcMain.handle(IPC.snapCreate, async (_e, label?: string) => {
+    if (!current) throw new Error('No vault is open');
+    const sendProg = (done: number, total: number) => {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send(IPC.evProgress, { label: label || 'Snapshot', done, total });
+    };
+    if (current.readOnly) {
+      const h = crypto.createHash('sha1').update(current.path.toLowerCase()).digest('hex');
+      return createSnapshotWithOptions(
+        {
+          snapshotsDir: path.join(app.getPath('userData'), 'snapshots', h),
+          boardFile: codeBoardFile(current.path),
+          includeNotes: false,
+          vaultRoot: current.path,
+        },
+        label,
+        sendProg,
+      );
+    }
+    return createSnapshot(current.path, label, sendProg);
+  });
+  ipcMain.handle(IPC.snapRestore, async (_e, id: string) => {
+    if (!current) throw new Error('No vault is open');
+    if (current.readOnly) {
+      const h = crypto.createHash('sha1').update(current.path.toLowerCase()).digest('hex');
+      return restoreSnapshotWithOptions(
+        {
+          snapshotsDir: path.join(app.getPath('userData'), 'snapshots', h),
+          boardFile: codeBoardFile(current.path),
+          includeNotes: false,
+          vaultRoot: current.path,
+        },
+        id,
+      );
+    }
+    return restoreSnapshot(current.path, id);
+  });
+  ipcMain.handle(IPC.snapDelete, async (_e, id: string) => {
+    if (!current) throw new Error('No vault is open');
+    if (current.readOnly) {
+      const h = crypto.createHash('sha1').update(current.path.toLowerCase()).digest('hex');
+      return deleteSnapshotFromDir(path.join(app.getPath('userData'), 'snapshots', h), id);
+    }
+    return deleteSnapshot(current.path, id);
   });
 
   // ---- M1/M2: notes, file ops, index, board

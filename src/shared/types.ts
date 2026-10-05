@@ -153,6 +153,10 @@ export const IPC = {
   semanticRelated: 'semantic:related',
   memoryGet: 'memory:get',
   memorySet: 'memory:set',
+  snapList: 'snap:list',
+  snapCreate: 'snap:create',
+  snapRestore: 'snap:restore',
+  snapDelete: 'snap:delete',
 } as const;
 
 // ---------- M1: index / graph / notes ----------
@@ -254,3 +258,11 @@ export interface BoardFile {
 
 // Re-export memory packs types (canonical defs in memory-packs.ts)
 export type { MemoryPolicy, MemoryPacks } from './memory-packs';
+
+export interface SnapshotInfo {
+  id: string;
+  createdAt: number;
+  label: string;
+  fileCount: number;
+  bytes: number;
+}
