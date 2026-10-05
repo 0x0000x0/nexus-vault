@@ -1,4 +1,5 @@
 // Status bar (Grok Bot).
+import pkg from '../../../../package.json';
 export function StatusBar({ selected, noteCount, hasVault }: { selected: string | null; noteCount: string; hasVault: boolean }) {
   return (
     <footer className="status">
@@ -10,7 +11,7 @@ export function StatusBar({ selected, noteCount, hasVault }: { selected: string 
       {selected && <span title={selected}>{selected}</span>}
       <div className="r">
         {hasVault && <span>{noteCount}</span>}
-        <span>Nexus Vault {__APP_VERSION__}</span>
+        <span>Nexus Vault {pkg.version}</span>
       </div>
     </footer>
   );

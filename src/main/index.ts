@@ -224,6 +224,8 @@ function createWindow(): void {
 
 /** Test-only hook: expand a few folders, select a note, capture the window, quit. */
 function setupScreenshot(w: BrowserWindow, out: string): void {
+  w.webContents.on('console-message', (e) => console.log('[renderer]', e.level, e.message));
+  w.webContents.on('preload-error', (_e, p, err) => console.log('[preload-error]', p, err));
   w.webContents.once('did-finish-load', async () => {
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
     await wait(1500);
