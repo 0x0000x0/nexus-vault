@@ -44,6 +44,12 @@ export interface Settings {
   lastVaultPath?: string;
   windowBounds?: WindowBounds;
   layout: LayoutSettings;
+  mcp: {
+    enabled: boolean;
+    port: number;
+    token: string;
+    readOnly: boolean;
+  };
 }
 
 export interface VaultInfo {
