@@ -1,6 +1,8 @@
 # Nexus Vault
 
-A local-first Windows desktop app for knowledge management, built with Electron, TypeScript, and React.
+A local-first, Obsidian-compatible notes app with a board (canvas) and graph view, built with Electron, TypeScript, and React. Primary target is Windows; Linux builds work for development.
+
+> Status: early (0.0.x). Prebuilt Windows binaries are not published yet — build from source (see below).
 
 ## What's new in 0.0.4
 - **Back / Forward** on Board + Graph (Alt+Left/Right, mouse back/forward buttons) — restores folder, pan/zoom, graph camera, selection and open note.
@@ -77,8 +79,10 @@ npm run dist:win
 ```
 
 Outputs to `dist/`:
-- `Nexus-Vault-Setup-0.0.1.exe` (NSIS installer)
-- `Nexus-Vault-Portable-0.0.1.exe` (portable)
+- `Nexus-Vault-Setup-<version>.exe` (NSIS installer)
+- `Nexus-Vault-Portable-<version>.exe` (portable)
+
+Or run `scripts/package-win.sh` for a slim, unpacked Windows x64 zip (split into ~62 MB parts) in `dist/`.
 
 Cross-build from Linux works because:
 - No native Node modules in M0
