@@ -31,6 +31,10 @@ export interface NexusApi {
   fileLinks(): Promise<[string, string][]>;
   previews(rels: string[]): Promise<Record<string, { preview: string; tags: string[] }>>;
   listNotes(): Promise<{ notes: { rel: string; title: string }[]; stats: IndexStats | null; ready: boolean }>;
+  // MCP methods
+  mcpStatus(): Promise<{ enabled: boolean; running: boolean; port: number; readOnly: boolean; token: string; url: string; error?: string }>;
+  mcpSet(patch: { enabled?: boolean; readOnly?: boolean; port?: number }): Promise<{ enabled: boolean; running: boolean; port: number; readOnly: boolean; token: string; url: string; error?: string }>;
+  mcpRegenToken(): Promise<{ enabled: boolean; running: boolean; port: number; readOnly: boolean; token: string; url: string; error?: string }>;
   // board
   readBoard(): Promise<BoardFile>;
   writeBoard(data: BoardFile): Promise<void>;

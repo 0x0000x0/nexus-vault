@@ -1,5 +1,6 @@
 // Pure helpers with no Electron dependency, unit-tested (Grok Bot).
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { DEFAULT_LAYOUT, LIMITS, type DirEntry, type Settings } from '../shared/types';
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -52,6 +53,7 @@ function clamp(n: unknown, lo: number, hi: number, dflt: number): number {
 /** Merge parsed JSON with defaults and validate every field. */
 export function normalizeSettings(raw: unknown): Settings {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, any>;
+  const m = r.mcp;
   const l = (r.layout && typeof r.layout === 'object' ? r.layout : {}) as Record<string, any>;
   const theme = r.theme === 'light' || r.theme === 'dark' ? r.theme : 'system';
   const recent = Array.isArray(r.recentVaults)
@@ -61,6 +63,12 @@ export function normalizeSettings(raw: unknown): Settings {
         .slice(0, 25)
     : [];
   const wb = r.windowBounds;
+  const mcpEnabled = typeof m?.enabled === 'boolean' ? m.enabled : false;
+  const mcpPort = ((m?.port as number) || 27124);
+  const mcpPortValidated = mcpPort < 1024 || mcpPort > 65535 ? 27124 : mcpPort;
+  const mcpToken = m?.token !== undefined && m?.token !== null ? String(m.token) : '';
+  const mcpReadOnly = m?.readOnly === false ? false : true;
+
   return {
     theme,
     recentVaults: recent,
@@ -79,6 +87,12 @@ export function normalizeSettings(raw: unknown): Settings {
       notePanelWidth: clamp(l.notePanelWidth, LIMITS.noteMin, LIMITS.noteMax, DEFAULT_LAYOUT.notePanelWidth),
       graphNodeSize: clamp(l.graphNodeSize, 0.3, 3, DEFAULT_LAYOUT.graphNodeSize),
       graphLinkWidth: clamp(l.graphLinkWidth, 0.3, 3, DEFAULT_LAYOUT.graphLinkWidth),
+    },
+    mcp: {
+      enabled: mcpEnabled,
+      port: mcpPortValidated,
+      token: mcpToken,
+      readOnly: mcpReadOnly,
     },
   };
 }

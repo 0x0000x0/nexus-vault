@@ -19,6 +19,7 @@ interface Props {
   onMenuOpen: () => void;
   onSearch: () => void;
   onOpenCode: () => void;
+  onAiAccess?: () => void;
 }
 
 export function TitleBar(p: Props) {
@@ -95,6 +96,12 @@ export function TitleBar(p: Props) {
               <span className="check" />
               Open GitHub repo / code project…
             </button>
+            {p.vault && p.onAiAccess && (
+              <button className="mi" onClick={act(p.onAiAccess)}>
+                <span className="check" />
+                AI access (MCP)…
+              </button>
+            )}
             {p.vault && (
               <button className="mi" onClick={act(p.onClose)}>
                 <span className="check" />
