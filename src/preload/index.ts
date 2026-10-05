@@ -66,6 +66,8 @@ const api: NexusApi = {
   semanticSearch: inv(IPC.semanticSearch),
   semanticRelated: inv(IPC.semanticRelated),
   platform: process.platform,
+  memoryGet: inv(IPC.memoryGet),
+  memorySet: inv(IPC.memorySet),
 };
 
 contextBridge.exposeInMainWorld('nexus', api);

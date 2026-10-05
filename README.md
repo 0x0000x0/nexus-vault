@@ -80,6 +80,19 @@ Cross-build from Linux works because:
 - `NEXUS_SCREENSHOT=<file.png>` — Capture page to file after load, then quit
 - `NEXUS_EXPAND=<comma,separated,relPaths>` — Pre-expand folders in tree
 
+
+## Memory packs
+
+Per-folder AI context policy for search / MCP (default: **When relevant**):
+
+- **Always include** — notes under this folder are prioritised for AI context
+- **When relevant** — normal ranking (default; inherited from ancestors)
+- **Never include** — notes under this folder are excluded from AI search results
+
+Right-click a folder (or the empty tree background for the vault root) → AI memory …. Explicit Always/Never show a small ★ / ⊘ badge.
+
+Stored at `<vault>/.nexus/memory-packs.json` for notes vaults. Code projects (read-only) store packs in app data, never inside the repo.
+
 ## License
 
 Apache-2.0 — Copyright 2026 Jesse Lugo
