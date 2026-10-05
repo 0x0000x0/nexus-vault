@@ -6,6 +6,20 @@ Built with Electron, TypeScript, and React. Opens folders of plain Markdown note
 
 > Status: early (0.0.x). Prebuilt Windows binaries are not published yet — build from source (see below).
 
+![Nexus Vault — folder tree, live graph, and note panel](screenshots/graph.png)
+
+## How people use it
+
+- **Personal notes** — daily notes, to-dos, decisions; link them with `[[wikilinks]]` and browse the map on the graph
+- **Knowledge library** — folders for books, articles, references; Ctrl+K search; board view for a folder overview
+- **AI memory / brain** — keep a notes vault as durable memory for a local AI (optional localhost MCP; memory packs per folder)
+- **Code / GitHub architecture** — drop a repo folder or ZIP; read-only board + import graph; never changes the repo
+- **Project planning** — zoomable board with note cards, nested folder boxes, and connection lines that become links
+
+## Windows note
+
+Windows may block the unsigned installer or `.exe` (Smart App Control or SmartScreen), the same way it can with other new apps. Builds are not code-signed yet. If Windows blocks it, turn Smart App Control off (or choose Run / Allow when prompted) so you can install and try the app.
+
 ## What's new in 0.0.4
 - **Back / Forward** on Board + Graph (Alt+Left/Right, mouse back/forward buttons) — restores folder, pan/zoom, graph camera, selection and open note.
 - **Semantic search** (local, OFF by default) — Ctrl+K *Semantic* chip, *Related notes* in the note panel.
