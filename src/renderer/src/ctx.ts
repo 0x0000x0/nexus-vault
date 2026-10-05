@@ -19,6 +19,8 @@ export interface AppActions {
   newFolder: (dir: string) => Promise<string | null>;
   renamed: (oldRel: string, newRel: string) => void;
   deleted: (rel: string) => void;
+  /** Back/Forward view history shared by Board and Graph (Alt+Left/Right). */
+  nav: { canBack: boolean; canForward: boolean; back: () => void; forward: () => void };
 }
 
 export const Ctx = createContext<AppActions | null>(null);
