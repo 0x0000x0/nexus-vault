@@ -2,7 +2,15 @@
 
 A local-first Windows desktop app for knowledge management, built with Electron, TypeScript, and React.
 
-## What 0.0.2 does (M0 + M1 + M2 + code mode)
+## What's new in 0.0.4
+- **Back / Forward** on Board + Graph (Alt+Left/Right, mouse back/forward buttons) — restores folder, pan/zoom, graph camera, selection and open note.
+- **Semantic search** (local, OFF by default) — Ctrl+K *Semantic* chip, *Related notes* in the note panel.
+- **AI access (MCP)** — optional localhost-only MCP server with bearer token, read-only by default (vault menu → AI access (MCP)…).
+- **Memory packs** — per-folder Always / When relevant / Never policy for AI results (right-click a folder → AI memory).
+- **Snapshots** — create / list / restore / delete point-in-time copies (vault menu → Snapshots…).
+- **Citations** — Sources panel after search; MCP search hits carry path, snippet, start line and a cite link.
+
+## What 0.0.4 does (M0 + M1 + M2 + code mode)
 
 - **Vault picker / switcher**: safe copy (recommended), open real folder, recent vaults, and **Open GitHub repo / code project** (drop a folder or `.zip`).
 - **Folder tree**: lazy, keyboard-navigable; Obsidian-style **right-click menu** (New note, New folder, Rename, Duplicate, Delete → vault `.trash`, Reveal in File Explorer, Copy path, Open on board, Show in graph); drag notes onto the board; live-updates from a file watcher.
