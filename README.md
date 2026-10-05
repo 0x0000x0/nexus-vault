@@ -1,8 +1,8 @@
 # Nexus Vault
 
-**Nexus Vault** — local notes with an Obsidian-style graph, a Milanote-style board, and IcePanel-style nested boxes. Your files stay on your PC. Optional AI access stays on localhost.
+**Nexus Vault** — a local notes app with a live link graph, a zoomable project board, and nested folder boxes. Your files stay on your PC. Optional AI access stays on localhost.
 
-Built with Electron, TypeScript, and React. Works with existing Obsidian vaults (plain Markdown folders). Primary target is Windows; Linux builds work for development.
+Built with Electron, TypeScript, and React. Opens folders of plain Markdown notes (including vaults you already keep as `.md` files). Primary target is Windows; Linux builds work for development.
 
 > Status: early (0.0.x). Prebuilt Windows binaries are not published yet — build from source (see below).
 
@@ -17,14 +17,14 @@ Built with Electron, TypeScript, and React. Works with existing Obsidian vaults 
 ## What 0.0.4 does (M0 + M1 + M2 + code mode)
 
 - **Vault picker / switcher**: safe copy (recommended), open real folder, recent vaults, and **Open GitHub repo / code project** (drop a folder or `.zip`).
-- **Folder tree**: lazy, keyboard-navigable; Obsidian-style **right-click menu** (New note, New folder, Rename, Duplicate, Delete → vault `.trash`, Reveal in File Explorer, Copy path, Open on board, Show in graph); drag notes onto the board; live-updates from a file watcher.
+- **Folder tree**: lazy, keyboard-navigable; **right-click menu** (New note, New folder, Rename, Duplicate, Delete → vault `.trash`, Reveal in File Explorer, Copy path, Open on board, Show in graph); drag notes onto the board; live-updates from a file watcher.
 - **Graph (M1)**: force-directed graph of notes from `[[wikilinks]]` and Markdown links (d3-force via react-force-graph-2d, bundled). Click opens a note, drag/zoom/pan, hover highlights neighbours, folder colours + legend, unresolved links as ghost nodes, toggles for labels/ghosts/orphans, zoom-to-fit.
 - **Index (M1)**: in-memory index of links, tags, headings + MiniSearch full-text, kept fresh by chokidar (pure JS, no native modules).
 - **Ctrl+K** quick search across titles and content.
 - **Note panel**: Markdown preview (clickable `[[links]]`) and editor; Ctrl+S saves; every write backs up the previous version into `.nexus-backups/`; conflict detection if the file changed on disk; backlinks with context, outgoing links, tags.
-- **Board (M2)**: Milanote/IcePanel-style board per folder, auto-populated with the folder's notes (cards) and subfolders (boxes you double-click to drill into; breadcrumb back). Tool strip works by click (adds at centre) or drag-and-drop: Note (creates a real `.md`), Text/sticky, Box/group, Image, Link card, Line tool. Move, resize, Shift-select / marquee, Delete key, zoom/pan, card colours, labelled lines.
+- **Board (M2)**: zoomable project board per folder, auto-populated with the folder's notes (cards) and subfolders (nested boxes you double-click to drill into; breadcrumb back). Tool strip works by click (adds at centre) or drag-and-drop: Note (creates a real `.md`), Text/sticky, Box/group, Image, Link card, Line tool. Move, resize, Shift-select / marquee, Delete key, zoom/pan, card colours, labelled lines.
 - **Lines ↔ links**: a line from one note card to another appends `[[Target]]` under `## Connections` in the source note; deleting that line unlinks it but keeps the word (`[[Target]]` → `Target`). Board layout is saved in `.nexus/board.json` inside the vault.
-- **Code architecture mode (read-only)**: repos (package.json / pyproject / go.mod / Cargo.toml / .git+code, no `.obsidian`) open strictly read-only. Board = folder boxes + file cards with import lines; graph = files + imports (JS/TS import/require, Python import/from, Go imports, md links), external packages as ghosts, big repos collapse to folder nodes. Code opens in a read-only viewer with syntax colouring. Zips are extracted into the app data folder; board layout for repos is stored in app data, never in the repo.
+- **Code architecture mode (read-only)**: repos (package.json / pyproject / go.mod / Cargo.toml / .git+code; skips hidden editor folders) open strictly read-only. Board = folder boxes + file cards with import lines; graph = files + imports (JS/TS import/require, Python import/from, Go imports, md links), external packages as ghosts, big repos collapse to folder nodes. Code opens in a read-only viewer with syntax colouring. Zips are extracted into the app data folder; board layout for repos is stored in app data, never in the repo.
 
 ## Semantic search (optional, OFF by default)
 - Ctrl+K → click the **Semantic** chip → **Enable**. Results with similar meaning are added after keyword hits (tagged "similar").
