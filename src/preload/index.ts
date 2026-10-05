@@ -1,6 +1,7 @@
 // Minimal typed bridge exposed as window.nexus. Grok Bot.
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { IPC, type DirEntry, type LayoutSettings, type NoteCount, type RecentVaultView, type Settings, type ThemePref, type VaultInfo } from '../shared/types';
+import type { NexusApi } from '../shared/api';
 
 function on<T>(channel: string, cb: (v: T) => void): () => void {
   const h = (_e: IpcRendererEvent, v: T) => cb(v);
@@ -8,7 +9,7 @@ function on<T>(channel: string, cb: (v: T) => void): () => void {
   return () => ipcRenderer.removeListener(channel, h);
 }
 
-const api = {
+const api: NexusApi = {
   getSettings: (): Promise<Settings> => ipcRenderer.invoke(IPC.getSettings),
   setTheme: (t: ThemePref): Promise<ThemePref> => ipcRenderer.invoke(IPC.setTheme, t),
   setLayout: (l: Partial<LayoutSettings>): Promise<LayoutSettings> => ipcRenderer.invoke(IPC.setLayout, l),
@@ -27,4 +28,3 @@ const api = {
 };
 
 contextBridge.exposeInMainWorld('nexus', api);
-export type NexusApi = typeof api;
