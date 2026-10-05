@@ -20,6 +20,7 @@ interface Props {
   onSearch: () => void;
   onOpenCode: () => void;
   onAiAccess?: () => void;
+  onSnapshots?: () => void;
 }
 
 export function TitleBar(p: Props) {
@@ -100,6 +101,12 @@ export function TitleBar(p: Props) {
               <button className="mi" onClick={act(p.onAiAccess)}>
                 <span className="check" />
                 AI access (MCP)…
+              </button>
+            )}
+            {p.vault && p.onSnapshots && (
+              <button className="mi" onClick={act(p.onSnapshots)}>
+                <span className="check" />
+                Snapshots…
               </button>
             )}
             {p.vault && (

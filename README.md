@@ -93,6 +93,10 @@ Right-click a folder (or the empty tree background for the vault root) → AI me
 
 Stored at `<vault>/.nexus/memory-packs.json` for notes vaults. Code projects (read-only) store packs in app data, never inside the repo.
 
+## Snapshots
+
+Create point-in-time copies of all notes and the board (vault menu → **Snapshots…**). Restore brings files back and moves newer notes into `.trash/restore-<id>/`. Notes vaults store snapshots in `.nexus/snapshots/`; code projects only snapshot the board layout into app data.
+
 ## License
 
 Apache-2.0 — Copyright 2026 Jesse Lugo

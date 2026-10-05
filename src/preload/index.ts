@@ -68,6 +68,10 @@ const api: NexusApi = {
   platform: process.platform,
   memoryGet: inv(IPC.memoryGet),
   memorySet: inv(IPC.memorySet),
+  snapList: inv(IPC.snapList),
+  snapCreate: inv(IPC.snapCreate),
+  snapRestore: inv(IPC.snapRestore),
+  snapDelete: inv(IPC.snapDelete),
 };
 
 contextBridge.exposeInMainWorld('nexus', api);
