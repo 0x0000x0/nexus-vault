@@ -308,3 +308,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .progress .bar i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
 .progress .bar i.indet { animation: indet 1.2s ease-in-out infinite; }
 @keyframes indet { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+.gsettings { flex-basis: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow2); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; min-width: 220px; }
+.gsettings label { display: grid; grid-template-columns: 90px 1fr 34px; align-items: center; gap: 6px; }
+.gsettings input[type=range] { accent-color: var(--accent); width: 100%; }
+.gsettings b { font-weight: 500; color: var(--muted); text-align: right; }
+.gsettings .linkbtn { align-self: flex-end; }

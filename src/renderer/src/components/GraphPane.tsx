@@ -18,11 +18,15 @@ interface Props {
   dark: boolean;
   selected: string | null;
   focus: { rel: string; n: number } | null;
+  nodeSize: number;
+  linkWidth: number;
+  onSizes: (p: { graphNodeSize?: number; graphLinkWidth?: number }, persist?: boolean) => void;
 }
 
 const idOf = (v: string | N) => (typeof v === 'string' ? v : (v.id as string));
 
-export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
+export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWidth, onSizes }: Props) {
+  const [showSettings, setShowSettings] = useState(false);
   const app = useApp();
   const wrapRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods<N, L>>();
@@ -93,7 +97,7 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
     const n = prevNodes.current.get(focus.rel);
     if (!fg || !n || n.x === undefined || n.y === undefined) return;
     fg.centerAt(n.x, n.y, 600);
-    fg.zoom(Math.max(2.2, fg.zoom()), 600);
+    fg.zoom(Math.max(2, fg.zoom()), 600);
     setHover(focus.rel);
     const t = setTimeout(() => setHover(null), 2500);
     return () => clearTimeout(t);
@@ -109,7 +113,10 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
     const d = app.graph.nodes.map((n) => n.degree).sort((a, b) => b - a);
     return Math.max(4, d[Math.floor(d.length * 0.12)] ?? 4);
   }, [app.graph]);
-  const nodeR = (n: N) => 3 + Math.sqrt(n.degree ?? 0) * 1.6;
+  // Obsidian-like sizing: ~3px base on screen, growing gently (log) with links, capped at ~2x for hubs.
+  // Radius is computed in screen pixels and only grows slowly when zooming in (scale^0.3).
+  const nodePx = (n: N) => nodeSize * (3 + Math.min(3, 1.1 * Math.log2(1 + (n.degree ?? 0))));
+  const nodeR = (n: N, scale: number) => (nodePx(n) * Math.pow(scale, 0.3)) / scale;
 
   return (
     <section className="pane" style={{ flex: 1 }} data-pane="graph">
@@ -134,6 +141,26 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
           <button className="chipbtn" onClick={() => fgRef.current?.zoomToFit(400, 30)} title="Zoom to fit">
             Fit
           </button>
+          <button className={`chipbtn${showSettings ? ' on' : ''}`} onClick={() => setShowSettings(!showSettings)} title="Node size and link thickness" data-testid="graph-settings">
+            ⚙ Display
+          </button>
+          {showSettings && (
+            <div className="gsettings" onPointerDown={(e) => e.stopPropagation()}>
+              <label>
+                <span>Node size</span>
+                <input type="range" min={0.3} max={3} step={0.05} value={nodeSize} onChange={(e) => onSizes({ graphNodeSize: Number(e.target.value) }, false)} onPointerUp={(e) => onSizes({ graphNodeSize: Number((e.target as HTMLInputElement).value) })} onKeyUp={(e) => onSizes({ graphNodeSize: Number((e.target as HTMLInputElement).value) })} data-testid="node-size" />
+                <b>{nodeSize.toFixed(1)}×</b>
+              </label>
+              <label>
+                <span>Link thickness</span>
+                <input type="range" min={0.3} max={3} step={0.05} value={linkWidth} onChange={(e) => onSizes({ graphLinkWidth: Number(e.target.value) }, false)} onPointerUp={(e) => onSizes({ graphLinkWidth: Number((e.target as HTMLInputElement).value) })} onKeyUp={(e) => onSizes({ graphLinkWidth: Number((e.target as HTMLInputElement).value) })} />
+                <b>{linkWidth.toFixed(1)}×</b>
+              </label>
+              <button className="linkbtn" onClick={() => onSizes({ graphNodeSize: 1, graphLinkWidth: 1 })}>
+                Reset
+              </button>
+            </div>
+          )}
         </div>
         {folders.length > 0 && (
           <div className="legend">
@@ -179,8 +206,8 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
             }
           }}
           linkColor={(l) => (hover && (idOf(l.source) === hover || idOf(l.target) === hover) ? colors.linkHl : colors.link)}
-          linkWidth={(l) => (hover && (idOf(l.source) === hover || idOf(l.target) === hover) ? 1.8 : 0.8)}
-          linkDirectionalArrowLength={(l) => (hover && (idOf(l.source) === hover || idOf(l.target) === hover) ? 4 : 0)}
+          linkWidth={(l) => linkWidth * (hover && (idOf(l.source) === hover || idOf(l.target) === hover) ? 1.6 : 0.6)}
+          linkDirectionalArrowLength={(l) => (hover && (idOf(l.source) === hover || idOf(l.target) === hover) ? 2.5 : 0)}
           linkDirectionalArrowRelPos={0.92}
           onNodeHover={(n) => {
             setHover(n ? (n.id as string) : null);
@@ -211,7 +238,7 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
           }}
           nodeCanvasObject={(n, ctx, scale) => {
             const id = n.id as string;
-            const r = nodeR(n);
+            const r = nodeR(n, scale);
             const dim = hl && id !== hover && !hl.has(id);
             const color = n.ghost ? colors.ghost : folderColor(n.folder, folders);
             ctx.globalAlpha = dim ? 0.15 : 1;
@@ -222,33 +249,35 @@ export function GraphPane({ view, onMax, dark, selected, focus }: Props) {
             if (n.ghost) {
               ctx.strokeStyle = colors.text;
               ctx.globalAlpha *= 0.4;
-              ctx.lineWidth = 0.6;
+              ctx.lineWidth = 0.8 / scale;
               ctx.stroke();
               ctx.globalAlpha = dim ? 0.15 : 1;
             }
             if (id === selected || id === hover) {
               ctx.beginPath();
-              ctx.arc(n.x!, n.y!, r + 2.5, 0, 2 * Math.PI);
+              ctx.arc(n.x!, n.y!, r + 2.5 / scale, 0, 2 * Math.PI);
               ctx.strokeStyle = '#8b6cf6';
-              ctx.lineWidth = 1.5;
+              ctx.lineWidth = 1.5 / scale;
               ctx.stroke();
             }
             const important = id === hover || id === selected || (hl && hl.has(id));
-            if (showLabels && (important || scale > 2.2 || (n.degree ?? 0) >= labelDegree)) {
-              const fs = Math.max(10 / scale, 2.5);
+            // Labels: constant ~11px on screen (independent of node size); non-highlighted labels fade out when zoomed out.
+            const fade = important ? 1 : Math.max(0, Math.min(1, (scale - 0.6) / 0.8));
+            if (showLabels && fade > 0.02 && (important || scale > 1.8 || (n.degree ?? 0) >= labelDegree)) {
+              const fs = 11 / scale;
               ctx.font = `${important ? 600 : 400} ${fs}px "Segoe UI", system-ui, sans-serif`;
               ctx.textAlign = 'center';
               ctx.textBaseline = 'top';
               ctx.fillStyle = colors.text;
-              ctx.globalAlpha = dim ? 0.15 : n.ghost ? 0.55 : 0.9;
-              ctx.fillText(n.title, n.x!, n.y! + r + 2);
+              ctx.globalAlpha = (dim ? 0.15 : n.ghost ? 0.55 : 0.9) * fade;
+              ctx.fillText(n.title, n.x!, n.y! + r + 2 / scale);
             }
             ctx.globalAlpha = 1;
           }}
-          nodePointerAreaPaint={(n, color, ctx) => {
+          nodePointerAreaPaint={(n, color, ctx, scale) => {
             ctx.fillStyle = color;
             ctx.beginPath();
-            ctx.arc(n.x!, n.y!, nodeR(n) + 2, 0, 2 * Math.PI);
+            ctx.arc(n.x!, n.y!, nodeR(n, scale) + 3 / scale, 0, 2 * Math.PI);
             ctx.fill();
           }}
         />

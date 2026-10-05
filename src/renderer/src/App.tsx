@@ -296,7 +296,7 @@ export function App() {
       readOnly={vault?.readOnly}
     />
   );
-  const graphPane = <GraphPane view={layout.view} onMax={maxToggle('graph')} dark={resolved === 'dark'} selected={selected} focus={graphFocus} />;
+  const graphPane = <GraphPane view={layout.view} onMax={maxToggle('graph')} dark={resolved === 'dark'} selected={selected} focus={graphFocus} nodeSize={layout.graphNodeSize} linkWidth={layout.graphLinkWidth} onSizes={(p, persist) => setLayout(p, persist)} />;
   const [left, right] = layout.paneOrder === 'board-graph' ? [board, graphPane] : [graphPane, board];
 
   const mainWidth = () => mainRef.current?.clientWidth ?? 1000;
