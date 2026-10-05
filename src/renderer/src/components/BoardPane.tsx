@@ -132,8 +132,9 @@ export function BoardPane(p: Props) {
     [folder, loadEntries],
   );
 
-  const noteSet = useMemo(() => new Set(app.graph.nodes.filter((n) => !n.ghost).map((n) => n.id)), [app.graph]);
-  const graphReady = app.graph.version >= 0;
+  const noteSet = app.files;
+  // Only prune/populate once the file list for this index is in (avoids wiping cards during a refresh race).
+  const graphReady = app.graph.version >= 0 && (app.files.size > 0 || app.graph.nodes.length === 0);
 
   // ---------- auto-populate: notes + subfolders of the current folder ----------
   useEffect(() => {
@@ -156,7 +157,7 @@ export function BoardPane(p: Props) {
       changed = true;
     };
     for (const e of entries.list) if (e.kind === 'folder' && !have.has(e.relPath) && !hidden.has(e.relPath)) add(e, 'folder');
-    for (const e of entries.list) if (e.kind === 'file' && e.ext === 'md' && !have.has(e.relPath) && !hidden.has(e.relPath) && noteSet.has(e.relPath)) add(e, 'note');
+    for (const e of entries.list) if (e.kind === 'file' && (e.ext === 'md' || p.readOnly) && !have.has(e.relPath) && !hidden.has(e.relPath) && noteSet.has(e.relPath)) add(e, 'note');
     if (changed) {
       const ids = new Set(nodes.map((n) => n.id));
       update((bb) => ({ ...bb, nodes, edges: bb.edges.filter((ed) => ids.has(ed.from) && ids.has(ed.to)), view: bb.view ?? undefined }));
@@ -208,10 +209,13 @@ export function BoardPane(p: Props) {
     const out: RenderEdge[] = [];
     const seen = new Set<string>();
     const labelOf = new Map(board.edges.filter((e) => e.link).map((e) => [`${e.from}>${e.to}`, e.label]));
-    for (const l of app.graph.links) {
-      const a = noteNode.get(l.source);
-      const b = noteNode.get(l.target);
-      if (!a || !b) continue;
+    // Code mode (IcePanel style): a file inside a folder box is represented by that box.
+    const folderCards = p.readOnly ? board.nodes.filter((n) => n.type === 'folder' && n.file !== undefined).sort((x, y) => y.file!.length - x.file!.length) : [];
+    const cardOf = (f: string) => noteNode.get(f) ?? folderCards.find((n) => n.file === '' || f.startsWith(n.file + '/'))?.id;
+    for (const [src, tgt] of app.fileLinks) {
+      const a = cardOf(src);
+      const b = cardOf(tgt);
+      if (!a || !b || a === b) continue;
       const key = `${a}>${b}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -220,7 +224,7 @@ export function BoardPane(p: Props) {
     for (const pe of pending) if (!seen.has(`${pe.from}>${pe.to}`) && byId.has(pe.from) && byId.has(pe.to)) out.push(pe);
     for (const e of board.edges) if (!e.link && byId.has(e.from) && byId.has(e.to)) out.push({ id: e.id, from: e.from, to: e.to, label: e.label, link: false });
     return out;
-  }, [app.graph.links, noteNode, board.edges, pending, byId]);
+  }, [app.fileLinks, noteNode, board.edges, pending, byId, p.readOnly, board.nodes]);
   useEffect(() => setPending([]), [app.graph.version]);
 
   /** Grid columns that fit the visible pane at ~80% zoom (2..6). */
@@ -689,7 +693,7 @@ export function BoardPane(p: Props) {
             setEditingEdge(e.id);
           }}
         >
-          <title>{e.link ? 'Link written in the note (Delete removes the link, keeps the text). Double-click to label.' : 'Board-only line. Double-click to label.'}</title>
+          <title>{p.readOnly ? (e.link ? 'Import / dependency (from the code)' : 'Board-only line. Double-click to label.') : e.link ? 'Link written in the note (Delete removes the link, keeps the text). Double-click to label.' : 'Board-only line. Double-click to label.'}</title>
         </line>
       </g>
     );
@@ -802,12 +806,13 @@ export function BoardPane(p: Props) {
       const pv = n.file ? previews[n.file] : undefined;
       const top = n.file && n.file.includes('/') ? n.file.slice(0, n.file.indexOf('/')) : '';
       const missing = !!n.file && graphReady && !noteSet.has(n.file);
+      const isCode = !!n.file && !/\.md$/i.test(n.file);
       return (
-        <div {...common} className={cls + (missing ? ' missing' : '')} title={n.file}>
+        <div {...common} className={cls + (missing ? ' missing' : '') + (isCode ? ' code' : '')} title={n.file}>
           <div className="strip" style={{ background: folderColor(top, folders) }} />
-          <div className="ct">{n.file ? noteTitle(n.file) : 'Note'}</div>
+          <div className="ct">{n.file ? (isCode ? baseName(n.file) : noteTitle(n.file)) : 'Note'}</div>
           {n.file && dirOf(n.file) !== folder && <div className="cpath">{dirOf(n.file) || '/'}</div>}
-          <div className="cp">{missing ? 'Note not found' : pv?.preview || <span className="muted">Empty note</span>}</div>
+          <div className="cp">{missing ? 'File not found' : pv?.preview || <span className="muted">{isCode ? '' : 'Empty note'}</span>}</div>
           {!!pv?.tags.length && (
             <div className="ctags">
               {pv.tags.map((t) => (

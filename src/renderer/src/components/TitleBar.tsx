@@ -18,6 +18,7 @@ interface Props {
   onClose: () => void;
   onMenuOpen: () => void;
   onSearch: () => void;
+  onOpenCode: () => void;
 }
 
 export function TitleBar(p: Props) {
@@ -58,6 +59,7 @@ export function TitleBar(p: Props) {
         <VaultIcon />
         <span className="nm">{p.vault ? p.vault.name : 'No vault'}</span>
         {p.vault?.isCopy && <span className="badge">copy</span>}
+        {p.vault?.readOnly && <span className="badge">read-only repo</span>}
         <span className="caret">▼</span>
         {open && (
           <div className="menu" onClick={(e) => e.stopPropagation()}>
@@ -74,6 +76,7 @@ export function TitleBar(p: Props) {
                 <div>
                   {r.name}
                   {r.isCopy && <span className="badge">copy</span>}
+                  {r.mode === 'code' && <span className="badge">repo</span>}
                   {!r.exists && <span className="badge warn">not found</span>}
                   <small>{r.path}</small>
                 </div>
@@ -87,6 +90,10 @@ export function TitleBar(p: Props) {
             <button className="mi" onClick={act(p.onOpenReal)}>
               <span className="check" />
               Open folder as vault…
+            </button>
+            <button className="mi" onClick={act(p.onOpenCode)}>
+              <span className="check" />
+              Open GitHub repo / code project…
             </button>
             {p.vault && (
               <button className="mi" onClick={act(p.onClose)}>

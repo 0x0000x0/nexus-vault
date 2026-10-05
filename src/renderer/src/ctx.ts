@@ -6,6 +6,9 @@ export interface AppActions {
   vault: VaultInfo;
   graph: GraphData;
   indexVersion: number;
+  files: Set<string>; // every indexed file (notes, or code files in repo mode)
+  readOnly: boolean;
+  fileLinks: [string, string][];
   ask: (title: string, initial?: string, opts?: { okLabel?: string; placeholder?: string; selectBase?: boolean }) => Promise<string | null>;
   notify: (text: string, err?: boolean) => void;
   openNote: (rel: string, opts?: { edit?: boolean }) => void;

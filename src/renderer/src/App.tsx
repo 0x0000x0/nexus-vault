@@ -1,6 +1,6 @@
 // Root component: theme, layout persistence, vault actions, index state (Grok Bot).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DEFAULT_LAYOUT, LIMITS, type GraphData, type IndexStats, type LayoutSettings, type RecentVaultView, type ThemePref, type VaultInfo, type ViewMode } from '../../shared/types';
+import { DEFAULT_LAYOUT, LIMITS, type GraphData, type IndexStats, type ProgressInfo, type LayoutSettings, type RecentVaultView, type ThemePref, type VaultInfo, type ViewMode } from '../../shared/types';
 import { BoardPane, type ToolId } from './components/BoardPane';
 import { PromptModal, type PromptState } from './components/ContextMenu';
 import { Divider } from './components/Divider';
@@ -8,6 +8,7 @@ import { FolderTree } from './components/FolderTree';
 import { GraphPane } from './components/GraphPane';
 import { NotePanel } from './components/NotePanel';
 import { QuickSearch } from './components/QuickSearch';
+import { RepoDrop } from './components/RepoDrop';
 import { StatusBar } from './components/StatusBar';
 import { TitleBar } from './components/TitleBar';
 import { ToolStrip } from './components/ToolStrip';
@@ -42,6 +43,10 @@ export function App() {
   const [boardKey, setBoardKey] = useState(0);
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [quick, setQuick] = useState(false);
+  const [repoDrop, setRepoDrop] = useState(false);
+  const [prog, setProg] = useState<ProgressInfo | null>(null);
+  const [files, setFiles] = useState<Set<string>>(new Set());
+  const [fileLinks, setFileLinks] = useState<[string, string][]>([]);
   const mainRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef(0);
   const bannerTimer = useRef<number | null>(null);
@@ -63,13 +68,17 @@ export function App() {
     const offIndex = nexus.onIndexChanged((s) => {
       setStats(s);
       void nexus.getGraph().then(setGraph);
+      void nexus.listNotes().then((r) => setFiles(new Set(r.notes.map((n) => n.rel))));
+      void nexus.fileLinks().then(setFileLinks);
     });
+    const offProg = nexus.onProgress((p) => setProg(p.label ? p : null));
     const mq = () => setSystemDark(darkQuery.matches);
     darkQuery.addEventListener('change', mq);
     return () => {
       offCount();
       offTheme();
       offIndex();
+      offProg();
       darkQuery.removeEventListener('change', mq);
     };
   }, []);
@@ -81,9 +90,13 @@ export function App() {
     setOpenRel(null);
     setBoardFolder('');
     if (!vault) return;
+    setFiles(new Set());
+    setFileLinks([]);
     void nexus.listNotes().then((r) => {
       if (r.ready) {
         setStats(r.stats);
+        setFiles(new Set(r.notes.map((n) => n.rel)));
+        void nexus.fileLinks().then(setFileLinks);
         void nexus.getGraph().then(setGraph);
       }
     });
@@ -169,6 +182,14 @@ export function App() {
     setSelected(null);
     await refreshRecent();
   };
+  const openCode = (p: string) =>
+    run('Opening code project…', async () => {
+      const v = await nexus.openCode(p);
+      setRepoDrop(false);
+      await afterOpen(v);
+      setLayout({ view: 'split' });
+      notify(`Opened ${v.name} read-only (code architecture mode)${v.source ? ' — extracted to ' + v.path : ''}`);
+    });
   const removeRecent = async (p: string) => {
     await nexus.removeRecent(p);
     await refreshRecent();
@@ -189,6 +210,9 @@ export function App() {
       vault,
       graph,
       indexVersion: stats?.version ?? 0,
+      files,
+      fileLinks,
+      readOnly: vault.readOnly,
       ask,
       notify,
       openNote: (rel, opts) => {
@@ -248,7 +272,7 @@ export function App() {
       },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vault, graph, stats?.version, ask, notify]);
+  }, [vault, graph, stats?.version, files, fileLinks, ask, notify]);
 
   if (!ready) return <div className="app" />;
 
@@ -269,6 +293,7 @@ export function App() {
       setLineMode={setLineMode}
       focus={boardFocus}
       selectedRel={selected}
+      readOnly={vault?.readOnly}
     />
   );
   const graphPane = <GraphPane view={layout.view} onMax={maxToggle('graph')} dark={resolved === 'dark'} selected={selected} focus={graphFocus} />;
@@ -305,6 +330,7 @@ export function App() {
         onClose={() => void closeVault()}
         onMenuOpen={() => void refreshRecent()}
         onSearch={() => setQuick(true)}
+        onOpenCode={() => setRepoDrop(true)}
       />
       <div className="body">
         {!vault && banner && (
@@ -314,7 +340,7 @@ export function App() {
           </div>
         )}
         {!vault || !actions ? (
-          <VaultPicker recent={recent} busy={busy} onOpenCopy={() => void openCopy()} onOpenReal={() => void openReal()} onOpenRecent={(p) => void openRecent(p)} onRemove={(p) => void removeRecent(p)} />
+          <VaultPicker recent={recent} busy={busy} onOpenCopy={() => void openCopy()} onOpenReal={() => void openReal()} onOpenRecent={(p) => void openRecent(p)} onRemove={(p) => void removeRecent(p)} onOpenCode={() => setRepoDrop(true)} />
         ) : (
           <Ctx.Provider value={actions}>
             <FolderTree vault={vault} width={layout.treeWidth} selected={selected} openRel={openRel} onSelect={(rel) => setSelected(rel)} reveal={treeReveal} />
@@ -325,7 +351,7 @@ export function App() {
               onEnd={(dx) => setLayout({ treeWidth: Math.min(LIMITS.treeMax, Math.max(LIMITS.treeMin, dragStart.current + dx)) })}
               onReset={() => setLayout({ treeWidth: DEFAULT_LAYOUT.treeWidth })}
             />
-            <ToolStrip expanded={layout.toolStripExpanded} width={toolWidth} lineMode={lineMode} onTool={onTool} />
+            <ToolStrip expanded={layout.toolStripExpanded} width={toolWidth} lineMode={lineMode} onTool={onTool} readOnly={vault.readOnly} />
             <Divider
               thin
               testId="div-tools"
@@ -370,7 +396,7 @@ export function App() {
                   onEnd={(dx) => setLayout({ notePanelWidth: clampNote(dragStart.current - dx) })}
                   onReset={() => setLayout({ notePanelWidth: DEFAULT_LAYOUT.notePanelWidth })}
                 />
-                <NotePanel rel={openRel} editRequest={editReq} width={layout.notePanelWidth} onClose={() => setLayout({ notePanelOpen: false })} />
+                <NotePanel rel={openRel} editRequest={editReq} width={layout.notePanelWidth} onClose={() => setLayout({ notePanelOpen: false })} readOnly={vault.readOnly} />
               </>
             ) : (
               <button className="npopen" title="Show note panel" onClick={() => setLayout({ notePanelOpen: true })}>
@@ -390,8 +416,15 @@ export function App() {
           </Ctx.Provider>
         )}
         {prompt && <PromptModal p={prompt} onDone={() => setPrompt(null)} />}
+        {repoDrop && <RepoDrop recent={recent} busy={!!busy || !!prog} onOpen={(p) => void openCode(p)} onOpenRecent={(p) => void openRecent(p).then(() => setRepoDrop(false))} onClose={() => setRepoDrop(false)} />}
+        {prog && (
+          <div className="progress" data-testid="progress">
+            <div>{prog.label}{prog.total > 0 ? ` ${Math.round((prog.done / prog.total) * 100)}%` : ''}</div>
+            <div className="bar"><i style={{ width: prog.total > 0 ? `${(prog.done / prog.total) * 100}%` : '30%' }} className={prog.total > 0 ? '' : 'indet'} /></div>
+          </div>
+        )}
       </div>
-      <StatusBar selected={selected} noteCount={countText} vault={vault} stats={stats} />
+      <StatusBar selected={selected} noteCount={countText} vault={vault} stats={stats} readOnly={vault?.readOnly} />
     </div>
   );
 }

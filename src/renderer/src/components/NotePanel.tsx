@@ -3,7 +3,8 @@ import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FsChange, NoteFile, NoteInfo } from '../../../shared/types';
-import { errMsg, noteTitle, useApp } from '../ctx';
+import { baseName, errMsg, noteTitle, useApp } from '../ctx';
+import { highlight } from '../highlight';
 
 interface Props {
   rel: string | null;
@@ -140,7 +141,17 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
     [],
   );
 
-  const html = useMemo(() => (mode === 'preview' ? render(text) : ''), [mode, text]);
+  const ext = rel ? (rel.split('.').pop() ?? '').toLowerCase() : '';
+  const isMd = ext === 'md';
+  const codeLines = 6000;
+  const html = useMemo(() => {
+    if (mode !== 'preview') return '';
+    if (isMd || !rel) return render(text);
+    const lines = text.split(/\r?\n/);
+    const shown = lines.slice(0, codeLines).join('\n');
+    return highlight(shown, ext);
+  }, [mode, text, isMd, ext, rel]);
+  const lineCount = useMemo(() => (isMd ? 0 : Math.min(codeLines, text.split(/\r?\n/).length)), [isMd, text]);
 
   const onPreviewClick = (e: React.MouseEvent) => {
     const a = (e.target as HTMLElement).closest('a') as HTMLAnchorElement | null;
@@ -160,7 +171,8 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
   return (
     <aside className="notepanel" style={{ width }} data-testid="note-panel">
       <div className="panehead">
-        <b className="ttl" title={rel ?? ''}>{rel ? noteTitle(rel) : 'Note'}</b>
+        <b className="ttl" title={rel ?? ''}>{rel ? (isMd ? noteTitle(rel) : baseName(rel)) : 'Note'}</b>
+        {readOnly && rel && <span className="badge">read-only</span>}
         {dirty && <span className="dirty" title="Unsaved changes">●</span>}
         {savedAt && !dirty && <span className="saved">Saved {savedAt}</span>}
         <div className="r">
@@ -221,12 +233,19 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
                 }}
               />
             ) : (
-              <div className="md" onClick={onPreviewClick} onDoubleClick={() => !readOnly && setMode('edit')} dangerouslySetInnerHTML={{ __html: html }} />
+              isMd ? (
+                <div className="md" onClick={onPreviewClick} onDoubleClick={() => !readOnly && setMode('edit')} dangerouslySetInnerHTML={{ __html: html }} />
+              ) : (
+                <div className="codeview">
+                  <pre className="gutter" aria-hidden="true">{Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}</pre>
+                  <pre className="src" dangerouslySetInnerHTML={{ __html: html }} />
+                </div>
+              )
             )}
           </div>
           <div className="nplinks">
             <details open>
-              <summary>Backlinks ({info?.backlinks.length ?? 0})</summary>
+              <summary>{readOnly ? 'Used by' : 'Backlinks'} ({info?.backlinks.length ?? 0})</summary>
               {info?.backlinks.length ? (
                 info.backlinks.map((b) => (
                   <div key={b.rel} className="bl" onClick={() => app.openNote(b.rel)} title={b.rel}>
@@ -235,13 +254,13 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
                   </div>
                 ))
               ) : (
-                <div className="muted">No notes link here yet.</div>
+                <div className="muted">{readOnly ? 'Nothing imports this file.' : 'No notes link here yet.'}</div>
               )}
             </details>
             <details>
-              <summary>Outgoing links ({info?.outgoing.length ?? 0})</summary>
+              <summary>{readOnly ? 'Imports' : 'Outgoing links'} ({info?.outgoing.length ?? 0})</summary>
               {info?.outgoing.map((o) => (
-                <div key={o.target} className={`bl${o.resolved ? '' : ' ghost'}`} onClick={() => (o.resolved ? app.openNote(o.target) : app.notify(`"${o.title}" does not exist yet.`))}>
+                <div key={o.target} className={`bl${o.resolved ? '' : ' ghost'}`} onClick={() => (o.resolved ? app.openNote(o.target) : app.notify(readOnly ? `${o.title} is outside this repo.` : `"${o.title}" does not exist yet.`))}>
                   <div className="blt">{o.title}</div>
                 </div>
               ))}

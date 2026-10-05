@@ -13,11 +13,15 @@ export interface LayoutSettings {
   notePanelWidth: number;
 }
 
+export type VaultMode = 'notes' | 'code';
+
 export interface RecentVault {
   name: string;
   path: string;
   isCopy: boolean;
   lastOpened: number;
+  mode?: VaultMode;
+  source?: string; // original .zip path for extracted repos
 }
 
 export interface RecentVaultView extends RecentVault {
@@ -44,6 +48,15 @@ export interface VaultInfo {
   name: string;
   path: string;
   isCopy: boolean;
+  mode: VaultMode;
+  readOnly: boolean; // code mode: nothing inside the folder is ever written
+  source?: string;
+}
+
+export interface ProgressInfo {
+  label: string; // '' = finished
+  done: number;
+  total: number;
 }
 
 export interface DirEntry {
@@ -113,6 +126,7 @@ export const IPC = {
   pickImage: 'board:pick-image',
   readImage: 'board:read-image',
   openExternal: 'board:open-external',
+  openCode: 'vault:open-code',
   addConnection: 'link:add',
   removeConnection: 'link:remove',
   // main -> renderer events
@@ -121,6 +135,7 @@ export const IPC = {
   evVaultChanged: 'ev:vault-changed',
   evIndexChanged: 'ev:index-changed',
   evFsChanged: 'ev:fs-changed',
+  evProgress: 'ev:progress',
 } as const;
 
 // ---------- M1: index / graph / notes ----------

@@ -161,8 +161,12 @@ export async function duplicatePath(root: string, rel: string): Promise<string> 
 
 // ---------- board ----------
 export async function readBoard(root: string): Promise<BoardFile> {
+  return readBoardAt(path.join(root, BOARD_FILE));
+}
+
+export async function readBoardAt(file: string): Promise<BoardFile> {
   try {
-    const raw = JSON.parse(await fsp.readFile(path.join(root, BOARD_FILE), 'utf8'));
+    const raw = JSON.parse(await fsp.readFile(file, 'utf8'));
     if (raw && typeof raw === 'object' && raw.boards && typeof raw.boards === 'object') return { version: 1, boards: raw.boards };
   } catch {
     /* missing or invalid */
@@ -171,7 +175,10 @@ export async function readBoard(root: string): Promise<BoardFile> {
 }
 
 export async function writeBoard(root: string, data: BoardFile): Promise<void> {
-  const abs = path.join(root, BOARD_FILE);
+  return writeBoardAt(path.join(root, BOARD_FILE), data);
+}
+
+export async function writeBoardAt(abs: string, data: BoardFile): Promise<void> {
   await fsp.mkdir(path.dirname(abs), { recursive: true });
   await atomicWrite(abs, JSON.stringify({ version: 1, boards: data.boards }, null, 1));
 }

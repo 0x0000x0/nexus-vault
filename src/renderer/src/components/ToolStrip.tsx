@@ -12,17 +12,18 @@ const TOOLS: { id: ToolId; label: string; icon: string; tip: string }[] = [
   { id: 'line', label: 'Line', icon: 'Link', tip: 'Line / arrow — drag from card to card. Note→note lines write [[links]]' },
 ];
 
-export function ToolStrip({ expanded, width, lineMode, onTool, disabled }: { expanded: boolean; width: number; lineMode: boolean; onTool: (t: ToolId) => void; disabled?: boolean }) {
+export function ToolStrip({ expanded, width, lineMode, onTool, readOnly }: { expanded: boolean; width: number; lineMode: boolean; onTool: (t: ToolId) => void; readOnly?: boolean }) {
   return (
     <nav className="tools" style={{ width }} aria-label="Board tools">
       {TOOLS.map((t, i) => {
         const Icon = ToolIcons[t.icon];
+        const disabled = readOnly && (t.id === 'note' || t.id === 'image');
         return (
           <span key={t.id} style={{ display: 'contents' }}>
             {i === 4 && <div className="toolsep" />}
             <button
               className={`tool${t.id === 'line' && lineMode ? ' on' : ''}`}
-              title={`${t.tip}\nClick to add · or drag onto the board`}
+              title={disabled ? `${t.label}: not available in a read-only repo` : `${t.tip}\nClick to add · or drag onto the board`}
               data-tool={t.id}
               disabled={disabled}
               draggable={!disabled}

@@ -1,6 +1,6 @@
 // Minimal typed bridge exposed as window.nexus. Grok Bot.
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import { IPC, type FsChange, type IndexStats, type NoteCount } from '../shared/types';
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
+import { IPC, type FsChange, type IndexStats, type NoteCount, type ProgressInfo } from '../shared/types';
 import type { NexusApi } from '../shared/api';
 
 function on<T>(channel: string, cb: (v: T) => void): () => void {
@@ -41,11 +41,16 @@ const api: NexusApi = {
   getNoteInfo: inv(IPC.getNoteInfo),
   listNotes: inv(IPC.listNotes),
   previews: inv(IPC.previews),
+  fileLinks: inv('index:links'),
   readBoard: inv(IPC.readBoard),
   writeBoard: inv(IPC.writeBoard),
   pickImage: inv(IPC.pickImage),
   readImage: inv(IPC.readImage),
   openExternal: inv(IPC.openExternal),
+  openCode: inv(IPC.openCode),
+  pickRepo: inv('vault:pick-repo'),
+  pathForFile: (f: File) => webUtils.getPathForFile(f),
+  onProgress: (cb) => on<ProgressInfo>(IPC.evProgress, cb),
   addConnection: inv(IPC.addConnection),
   removeConnection: inv(IPC.removeConnection),
   onNoteCount: (cb) => on<NoteCount>(IPC.evNoteCount, cb),
