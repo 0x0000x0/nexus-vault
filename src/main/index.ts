@@ -2,7 +2,8 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, session, shell, type MenuItemConstructorOptions } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import { IPC, type BoardFile, type LayoutSettings, type RecentVaultView, type SemanticHit, type SemanticStatus, type ThemePref, type VaultInfo } from '../shared/types';
+import { ARCH_BOARD_KEY, IPC, type BoardFile, type LayoutSettings, type RecentVaultView, type SemanticHit, type SemanticStatus, type ThemePref, type VaultInfo } from '../shared/types';
+import type { ArchCache, ArchModel } from '../shared/arch';
 import { startMcp, stopMcp, mcpStatus, newToken } from './mcp';
 import { type McpBackend } from './mcp-core';
 import { type MemoryPacks, type MemoryPolicy, applyPolicy, emptyPacks, policyFor, setPolicy } from '../shared/memory-packs';
@@ -20,6 +21,8 @@ import {
 } from './snapshots';
 import { VaultIndex } from './indexer';
 import { CodeIndex } from './codeindex';
+import { collectRootEntries, inferArchitecture, type PackageJsonHint } from './archinfer';
+import { layoutArch } from '../shared/arch-layout';
 import { detectRepo, extractZip } from './repo';
 import crypto from 'node:crypto';
 import * as ops from './fileops';
@@ -55,6 +58,7 @@ let countToken = 0;
 let index: VaultIndex | CodeIndex | null = null;
 let semanticIdx: SemanticIndex | null = null;
 let mcpStarted = false;
+let archCache: ArchCache | null = null;
 
 const backendFactory = (): McpBackend => {
   const root = current?.path ?? '';
@@ -100,6 +104,7 @@ const backendFactory = (): McpBackend => {
 async function startIndex(): Promise<void> {
   await index?.close();
   index = null;
+  archCache = null;
   dropSemantic();
   if (!current) return;
   const onChange = (stats: import('../shared/types').IndexStats, fsChange: import('../shared/types').FsChange) => {
@@ -121,6 +126,7 @@ async function startIndex(): Promise<void> {
       const st = idx.stats();
       logInfo('index', `index-ready notes=${st.notes} links=${st.links} mode=${current?.mode ?? '?'}`);
       if (getSettings().semanticSearch) buildSemantic();
+      if (current?.mode === 'code' && idx instanceof CodeIndex) void buildArchModel(false);
     })
     .catch((e) => logError('index', 'index start failed', e));
 }
@@ -232,6 +238,127 @@ function codeBoardFile(repo: string): string {
   return path.join(app.getPath('userData'), 'code-boards', `${h}.json`);
 }
 
+/** Architecture model cache for read-only repos (userData only, never inside the repo). */
+function codeArchFile(repo: string): string {
+  const h = crypto.createHash('sha1').update(repo.toLowerCase()).digest('hex').slice(0, 16);
+  return path.join(app.getPath('userData'), 'code-arch', `${h}.json`);
+}
+
+async function readArchCache(repo: string): Promise<ArchCache | null> {
+  try {
+    const raw = await fs.promises.readFile(codeArchFile(repo), 'utf8');
+    const j = JSON.parse(raw) as ArchCache;
+    if (j?.version === 1 && j.model?.version === 1) return j;
+  } catch {
+    /* miss */
+  }
+  return null;
+}
+
+async function writeArchCache(repo: string, cache: ArchCache): Promise<void> {
+  const f = codeArchFile(repo);
+  await fs.promises.mkdir(path.dirname(f), { recursive: true });
+  await fs.promises.writeFile(f, JSON.stringify(cache), 'utf8');
+}
+
+async function readPackageJsonHint(root: string): Promise<PackageJsonHint | null> {
+  try {
+    const raw = await fs.promises.readFile(path.join(root, 'package.json'), 'utf8');
+    const j = JSON.parse(raw) as PackageJsonHint;
+    return {
+      name: typeof j.name === 'string' ? j.name : undefined,
+      workspaces: j.workspaces,
+      dependencies: j.dependencies,
+      devDependencies: j.devDependencies,
+      main: typeof j.main === 'string' ? j.main : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function listRootEntries(root: string): Promise<string[]> {
+  try {
+    return (await fs.promises.readdir(root)).filter((n) => !n.startsWith('.'));
+  } catch {
+    return [];
+  }
+}
+
+async function findMarkerFiles(root: string, rels: string[]): Promise<string[]> {
+  const markers: string[] = [];
+  for (const r of rels) {
+    if (/(^|\/)electron-vite\.config\.(ts|js|mjs|cjs)$/.test(r)) markers.push(r);
+  }
+  // also check root for configs not in code index
+  for (const name of ['electron-vite.config.ts', 'electron-vite.config.js', 'electron-vite.config.mjs', 'go.mod', 'Cargo.toml', 'pyproject.toml']) {
+    try {
+      await fs.promises.access(path.join(root, name));
+      if (!markers.includes(name)) markers.push(name);
+    } catch {
+      /* */
+    }
+  }
+  return markers;
+}
+
+async function buildArchModel(force = false): Promise<ArchModel | null> {
+  if (!current || current.mode !== 'code' || !(index instanceof CodeIndex) || !index.ready) return null;
+  const repo = current.path;
+  if (!force && archCache?.model) return archCache.model;
+  progress('Building architecture…', 0, 1);
+  try {
+    const rels = index.rels();
+    const packageJson = await readPackageJsonHint(repo);
+    const rootEntries = await listRootEntries(repo);
+    const markerFiles = await findMarkerFiles(repo, rels);
+    const model = inferArchitecture({
+      rootName: current.name,
+      rels,
+      edges: index.importEdges(),
+      externals: index.externalPackages(),
+      packageJson,
+      rootEntries: rootEntries.length ? rootEntries : collectRootEntries(rels),
+      markerFiles,
+    });
+    const prev = archCache ?? (await readArchCache(repo));
+    const cache: ArchCache = {
+      version: 1,
+      model,
+      preferredView: prev?.preferredView ?? 'architecture',
+      archUserEdited: force ? false : (prev?.archUserEdited ?? false),
+      updatedAt: Date.now(),
+    };
+    archCache = cache;
+    await writeArchCache(repo, cache);
+    // Seed / refresh __arch__ board layout in code-boards (userData) unless user edited
+    try {
+      const boardPath = codeBoardFile(repo);
+      const board = await ops.readBoardAt(boardPath);
+      const existing = board.boards[ARCH_BOARD_KEY];
+      // Only auto-seed when empty or forced rebuild — never clobber a saved layout
+      if (!existing?.nodes?.length || force) {
+        const laid = layoutArch(model);
+        board.boards[ARCH_BOARD_KEY] = laid;
+        await ops.writeBoardAt(boardPath, board);
+        cache.archUserEdited = false;
+        archCache = cache;
+        await writeArchCache(repo, cache);
+      }
+    } catch (e) {
+      logWarn('arch', `arch board seed failed: ${e instanceof Error ? e.message : e}`);
+    }
+    progress('', 1, 1);
+    logInfo('arch', `arch-ready heuristic=${model.stats.heuristic} nodes=${model.nodes.length} edges=${model.edges.length} truncated=${model.stats.truncated}`);
+    return model;
+  } catch (e) {
+    progress('', 0, 0);
+    logWarn('arch', `arch build failed: ${e instanceof Error ? e.message : e}`);
+    return null;
+  }
+}
+
+
 function setTitle(): void {
   win?.setTitle(current ? `Nexus Vault — ${current.name}` : 'Nexus Vault');
 }
@@ -273,6 +400,7 @@ function closeVault(): void {
   countToken++;
   void index?.close();
   index = null;
+  archCache = null;
   updateSettings({ lastVaultPath: undefined });
   setTitle();
 }
@@ -577,6 +705,23 @@ function registerIpc(): void {
   handle(IPC.listNotes, () => ({ notes: index?.listNotes() ?? [], stats: index?.stats() ?? null, ready: !!index?.ready }));
   handle(IPC.readBoard, () => (current?.readOnly ? ops.readBoardAt(codeBoardFile(current.path)) : ops.readBoard(v())));
   handle(IPC.writeBoard, (_e, data: BoardFile) => (current?.readOnly ? ops.writeBoardAt(codeBoardFile(current.path), data) : ops.writeBoard(v(), data)));
+  handle(IPC.archGet, async () => {
+    if (!current || current.mode !== 'code') return null;
+    if (archCache?.model) return archCache.model;
+    const disk = await readArchCache(current.path);
+    if (disk) {
+      archCache = disk;
+      return disk.model;
+    }
+    return buildArchModel(false);
+  });
+  handle(IPC.archRebuild, async () => {
+    if (!current || current.mode !== 'code') throw new Error('Architecture is only available for code repos');
+    if (!(index instanceof CodeIndex) || !index.ready) throw new Error('Code index is not ready yet');
+    const m = await buildArchModel(true);
+    if (!m) throw new Error('Could not build architecture');
+    return m;
+  });
   handle('vault:pick-repo', async (_e, kind: 'folder' | 'zip') => {
     const opts =
       kind === 'zip'

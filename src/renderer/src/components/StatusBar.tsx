@@ -11,7 +11,10 @@ export function StatusBar({ selected, noteCount, vault, stats, readOnly }: { sel
       </span>
       {vault &&
         (readOnly ? (
-          <span className="ro" title="Nothing inside this folder is ever modified. Board layout is stored in the app's own data folder.">Read-only repo</span>
+          <>
+            <span className="ro" title="Nothing inside this folder is ever modified. Board layout is stored in the app's own data folder.">Read-only repo</span>
+            <span className="badge" title="Board Architecture view is inferred from folders and imports — not a perfect C4 model.">Architecture (inferred)</span>
+          </>
         ) : vault.isCopy ? (
           <span title="Edits go to the safe copy; every write is backed up in .nexus-backups">Editing safe copy · backups on</span>
         ) : (

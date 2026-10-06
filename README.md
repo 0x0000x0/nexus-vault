@@ -4,7 +4,7 @@
 
 Built with Electron, TypeScript, and React. Opens folders of plain Markdown notes (including vaults you already keep as `.md` files). Primary target is Windows; Linux builds work for development.
 
-> Status: early (0.0.6). Prebuilt Windows binaries are not published yet — build from source (see below).
+> Status: early (0.0.7). Portable Windows zip is on the [GitHub Releases](https://github.com/0x0000x0/nexus-vault/releases) page (unsigned — see Windows note below). Or build from source.
 
 ![Nexus Vault — folder tree, live graph, and note panel](screenshots/graph.png)
 
@@ -19,6 +19,9 @@ Built with Electron, TypeScript, and React. Opens folders of plain Markdown note
 ## Windows note
 
 Windows may block the unsigned installer or `.exe` (Smart App Control or SmartScreen), the same way it can with other new apps. Builds are not code-signed yet. If Windows blocks it, turn Smart App Control off (or choose Run / Allow when prompted) so you can install and try the app.
+
+## What's new in 0.0.7
+- **Code architecture board** — after opening a repo, Board shows nested system / app / component boxes (IcePanel-style) inferred from folders + imports (Electron / monorepo / web / generic). Toggle **Architecture | Folders**; zoom into a group; Reset layout. Honest **Inferred** badge — not a perfect C4 model. Strongest for JS/TS; other languages get folder boxes. Layout stays in app data; repo stays read-only. Graph is unchanged (file/import force layout).
 
 ## What's new in 0.0.6
 - **Real vector semantic search** — optional (OFF by default); local Ollama `nomic-embed-text`; on-disk `.nexus-vectors/` (portable Linux→Windows); Related notes uses mean of chunk vectors.
@@ -47,7 +50,13 @@ Windows may block the unsigned installer or `.exe` (Smart App Control or SmartSc
 - **Note panel**: Markdown preview (clickable `[[links]]`) and editor; Ctrl+S saves; every write backs up the previous version into `.nexus-backups/`; conflict detection if the file changed on disk; backlinks with context, outgoing links, tags.
 - **Board (M2)**: zoomable project board per folder, auto-populated with the folder's notes (cards) and subfolders (nested boxes you double-click to drill into; breadcrumb back). Tool strip works by click (adds at centre) or drag-and-drop: Note (creates a real `.md`), Text/sticky, Box/group, Image, Link card, Line tool. Move, resize, Shift-select / marquee, Delete key, zoom/pan, card colours, labelled lines.
 - **Lines ↔ links**: a line from one note card to another appends `[[Target]]` under `## Connections` in the source note; deleting that line unlinks it but keeps the word (`[[Target]]` → `Target`). Board layout is saved in `.nexus/board.json` inside the vault.
-- **Code architecture mode (read-only)**: repos (package.json / pyproject / go.mod / Cargo.toml / .git+code; skips hidden editor folders) open strictly read-only. Board = folder boxes + file cards with import lines; graph = files + imports (JS/TS import/require, Python import/from, Go imports, md links), external packages as ghosts, big repos collapse to folder nodes. Code opens in a read-only viewer with syntax colouring. Zips are extracted into the app data folder; board layout for repos is stored in app data, never in the repo.
+- **Code architecture mode (read-only)**: repos (package.json / pyproject / go.mod / Cargo.toml / .git+code; skips hidden editor folders) open strictly read-only. **Board Architecture** = nested system/app/store/component groups inferred from structure + imports (toggle **Folders** for classic folder cards + import lines). **Graph** = files + imports (JS/TS import/require, Python import/from, Go imports, md links), external packages as ghosts, big repos collapse to folder nodes. Code opens in a read-only viewer with syntax colouring. Zips are extracted into the app data folder; board/architecture layout for repos is stored in app data, never in the repo.
+
+### Code architecture board (limitations)
+- Inferred from folders, manifests, and import edges — not semantic/domain modeling.
+- Best for JS/TS (especially Electron and npm workspaces); Python/Go get import edges + folders; Rust/Java/C# are folder-only until parsers exist.
+- Caps ~80 boxes / ~150 edges on large repos (same spirit as the collapsed folder graph).
+- Optional IcePanel JSON import is **not** in 0.0.7 (planned later); the sample under `icepanel/` is a manual reference only.
 
 ## Semantic search (optional, OFF by default)
 - Ctrl+K → click the **Semantic** chip → **Enable**. Results with similar meaning are added after keyword hits (tagged "similar").

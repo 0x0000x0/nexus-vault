@@ -1,4 +1,5 @@
 // Type of the window.nexus bridge (implemented in src/preload/index.ts). Grok Bot.
+import type { ArchModel } from './arch';
 import type { BoardFile, DirEntry, FsChange, ProgressInfo, GraphData, IndexStats, LayoutSettings, NoteCount, NoteFile, NoteInfo, RecentVaultView, SearchHit, Settings, ThemePref, VaultInfo, MemoryPacks, MemoryPolicy, SnapshotInfo } from './types';
 
 export interface NexusApi {
@@ -75,4 +76,9 @@ export interface NexusApi {
   copyLastError(): Promise<boolean>;
   logInfo(): Promise<{ file: string; dir: string; size: number }>;
   bootError(): Promise<string | null>;
+
+  /** Architecture model for code mode (null if not ready / not code). */
+  archGet(): Promise<ArchModel | null>;
+  /** Force re-infer architecture from current CodeIndex. */
+  archRebuild(): Promise<ArchModel>;
 }

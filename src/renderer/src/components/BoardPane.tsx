@@ -1,5 +1,8 @@
 // Milanote + IcePanel style board: note/folder/text/group/image/link cards, lines, drill-down (Grok Bot).
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ArchModel } from '../../../shared/arch';
+import { ARCH_BOARD_KEY } from '../../../shared/arch';
+import { layoutArch, nodesInsideGroup } from '../../../shared/arch-layout';
 import type { BoardData, BoardEdge, BoardFile, BoardNode, BoardNodeType, DirEntry, FsChange, ViewMode } from '../../../shared/types';
 import { NavButtons } from './NavButtons';
 import { baseName, dirOf, errMsg, folderColor, noteTitle, useApp } from '../ctx';
@@ -67,8 +70,15 @@ export function BoardPane(p: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [dropHint, setDropHint] = useState(false);
   const saveTimer = useRef<number | null>(null);
+  /** Code mode: Architecture (nested C4) vs Folders (per-folder cards). */
+  const [archView, setArchView] = useState(true);
+  const [archModel, setArchModel] = useState<ArchModel | null>(null);
+  const [archBusy, setArchBusy] = useState(false);
 
-  const board: BoardData = useMemo(() => normalizeBoard(file?.boards[folder]), [file, folder]);
+
+  const isArch = !!p.readOnly && archView;
+  const boardKey = isArch ? ARCH_BOARD_KEY : folder;
+  const board: BoardData = useMemo(() => normalizeBoard(file?.boards[boardKey]), [file, boardKey]);
   const view = board.view ?? { x: 0, y: 0, k: 1 };
   const boardRef = useRef(board);
   boardRef.current = board;
@@ -94,7 +104,7 @@ export function BoardPane(p: Props) {
   useEffect(() => () => flush(), [flush]);
 
   const update = useCallback(
-    (fn: (b: BoardData) => BoardData, f = folder) => {
+    (fn: (b: BoardData) => BoardData, f = boardKey) => {
       setFile((cur) => {
         if (!cur) return cur;
         const next: BoardFile = { version: 1, boards: { ...cur.boards, [f]: fn(normalizeBoard(cur.boards[f])) } };
@@ -104,7 +114,7 @@ export function BoardPane(p: Props) {
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
       saveTimer.current = window.setTimeout(flush, 400);
     },
-    [folder, flush],
+    [boardKey, flush],
   );
   const setView = (v: { x: number; y: number; k: number }) => update((b) => ({ ...b, view: v }));
 
@@ -137,12 +147,44 @@ export function BoardPane(p: Props) {
     [folder, loadEntries],
   );
 
+  // ---------- architecture model (code mode) ----------
+  useEffect(() => {
+    if (!p.readOnly) {
+      setArchModel(null);
+      return;
+    }
+    let live = true;
+    setArchBusy(true);
+    void window.nexus
+      .archGet()
+      .then((m) => {
+        if (!live) return;
+        setArchModel(m);
+        setFile((cur) => {
+          if (!cur || !m) return cur;
+          const existing = cur.boards[ARCH_BOARD_KEY];
+          if (existing?.nodes?.length) return cur;
+          const laid = layoutArch(m);
+          const next: BoardFile = { version: 1, boards: { ...cur.boards, [ARCH_BOARD_KEY]: laid } };
+          fileRef.current = next;
+          window.nexus.writeBoard(next).catch(() => undefined);
+          return next;
+        });
+      })
+      .catch(() => live && setArchModel(null))
+      .finally(() => live && setArchBusy(false));
+    return () => {
+      live = false;
+    };
+  }, [app.vault.path, p.readOnly, app.indexVersion]);
+
   const noteSet = app.files;
   // Only prune/populate once the file list for this index is in (avoids wiping cards during a refresh race).
   const graphReady = app.graph.version >= 0 && (app.files.size > 0 || app.graph.nodes.length === 0);
 
   // ---------- auto-populate: notes + subfolders of the current folder ----------
   useEffect(() => {
+    if (isArch) return; // architecture board is seeded from ArchModel, not folder listing
     if (!file || !entries || entries.folder !== folder || !graphReady) return;
     const b = board;
     const listed = new Set(entries.list.map((e) => e.relPath));
@@ -227,9 +269,16 @@ export function BoardPane(p: Props) {
       out.push({ id: 'L:' + key, from: a, to: b, link: true, label: labelOf.get(key) });
     }
     for (const pe of pending) if (!seen.has(`${pe.from}>${pe.to}`) && byId.has(pe.from) && byId.has(pe.to)) out.push(pe);
-    for (const e of board.edges) if (!e.link && byId.has(e.from) && byId.has(e.to)) out.push({ id: e.id, from: e.from, to: e.to, label: e.label, link: false });
+    for (const e of board.edges) {
+      if (!byId.has(e.from) || !byId.has(e.to)) continue;
+      if (e.link && !isArch) continue; // note [[links]] come from fileLinks / pending
+      const key = `${e.from}>${e.to}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ id: e.id, from: e.from, to: e.to, label: e.label, link: !!e.link });
+    }
     return out;
-  }, [app.fileLinks, noteNode, board.edges, pending, byId, p.readOnly, board.nodes]);
+  }, [app.fileLinks, noteNode, board.edges, pending, byId, p.readOnly, board.nodes, isArch]);
   useEffect(() => setPending([]), [app.graph.version]);
 
   /** Grid columns that fit the visible pane at ~80% zoom (2..6). */
@@ -264,6 +313,55 @@ export function BoardPane(p: Props) {
     const k = Math.max(viewRef.current.k, 0.8);
     setView({ k, x: el.clientWidth / 2 - (n.x + n.w / 2) * k, y: el.clientHeight / 2 - (n.y + n.h / 2) * k });
   };
+
+  const zoomToGroup = useCallback(
+    (n: BoardNode) => {
+      const el = wrapRef.current;
+      if (!el) return;
+      const inside = nodesInsideGroup(boardRef.current, n.id);
+      const bb = bbox([n, ...inside]);
+      if (!bb) return centerOn(n);
+      const k = Math.max(0.55, Math.min(1.4, Math.min((el.clientWidth - 60) / bb.w, (el.clientHeight - 60) / bb.h)));
+      setView({ k, x: (el.clientWidth - bb.w * k) / 2 - bb.x * k, y: (el.clientHeight - bb.h * k) / 2 - bb.y * k });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [boardKey],
+  );
+
+  const resetArchLayout = useCallback(() => {
+    if (!archModel) return;
+    const laid = layoutArch(archModel);
+    update(() => laid, ARCH_BOARD_KEY);
+    setTimeout(fit, 50);
+  }, [archModel, update, fit]);
+
+  const rebuildArch = useCallback(async () => {
+    setArchBusy(true);
+    try {
+      const m = await window.nexus.archRebuild();
+      setArchModel(m);
+      const laid = layoutArch(m);
+      update(() => laid, ARCH_BOARD_KEY);
+      setTimeout(fit, 50);
+    } catch (e) {
+      app.notify(errMsg(e), true, String((e as Error)?.stack ?? e));
+    } finally {
+      setArchBusy(false);
+    }
+  }, [update, app, fit]);
+
+
+  // Fit architecture once when it first appears
+  const archFitRef = useRef(false);
+  useEffect(() => {
+    if (!isArch || !board.nodes.length || archFitRef.current) return;
+    archFitRef.current = true;
+    const t = window.setTimeout(fit, 80);
+    return () => window.clearTimeout(t);
+  }, [isArch, board.nodes.length, fit]);
+  useEffect(() => {
+    archFitRef.current = false;
+  }, [app.vault.path]);
 
   // ---------- adding things ----------
   const addNode = (n: Omit<BoardNode, 'id'>, selectIt = true): string => {
@@ -598,6 +696,7 @@ export function BoardPane(p: Props) {
     if (!n) return;
     if (n.type === 'folder' && n.file !== undefined) p.setFolder(n.file);
     else if (n.type === 'note' && n.file) app.openNote(n.file);
+    else if (n.type === 'group' && isArch) zoomToGroup(n);
     else if (n.type === 'text' || n.type === 'group') setEditing(n.id);
     else if (n.type === 'link' && n.url && window.confirm(`Open in your web browser?\n\n${n.url}`)) void window.nexus.openExternal(n.url).catch((e) => app.notify(errMsg(e), true, String((e as Error)?.stack ?? e)));
     else if (n.type === 'image' && n.file) app.select(n.file);
@@ -648,7 +747,12 @@ export function BoardPane(p: Props) {
         { label: 'Add link card…', onClick: () => void runTool('link', at) },
         { sep: true, label: '' },
         { label: 'Zoom to fit', onClick: fit },
-        { label: 'Re-layout cards in a grid', onClick: () => relayout() },
+        ...(isArch
+          ? [
+              { label: 'Reset architecture layout', onClick: resetArchLayout, disabled: !archModel },
+              { label: 'Regenerate from repo', onClick: () => void rebuildArch(), disabled: archBusy },
+            ]
+          : [{ label: 'Re-layout cards in a grid', onClick: () => relayout() }]),
         ...(board.hidden.length ? [{ label: `Show ${board.hidden.length} removed card${board.hidden.length > 1 ? 's' : ''} again`, onClick: () => update((b) => ({ ...b, hidden: [] })) }] : []),
       ];
     } else {
@@ -656,6 +760,7 @@ export function BoardPane(p: Props) {
       items = [
         ...(n.type === 'note' ? [{ label: 'Open note', onClick: () => openNode(n) }, { label: 'Show in graph', onClick: () => app.showInGraph(n.file!) }] : []),
         ...(n.type === 'folder' ? [{ label: 'Open folder board', onClick: () => openNode(n) }] : []),
+        ...(n.type === 'group' && isArch ? [{ label: 'Zoom to group', onClick: () => zoomToGroup(n) }] : []),
         ...(n.type === 'text' || n.type === 'group' ? [{ label: 'Edit text', onClick: () => setEditing(n.id) }] : []),
         ...(n.type === 'link' ? [{ label: 'Open in browser', onClick: () => openNode(n) }] : []),
         { label: 'Draw line from here', onClick: () => p.setLineMode(true) },
@@ -938,21 +1043,63 @@ export function BoardPane(p: Props) {
         <NavButtons pane="board" />
         <BoardIcon size={13} />
         <b>Board</b>
+        {p.readOnly && (
+          <div className="seg" style={{ display: 'inline-flex', gap: 4, marginLeft: 8 }}>
+            <button
+              className={`chipbtn${archView ? ' on' : ''}`}
+              title="Nested system / app / component boxes inferred from the repo"
+              onClick={() => setArchView(true)}
+            >
+              Architecture
+            </button>
+            <button
+              className={`chipbtn${!archView ? ' on' : ''}`}
+              title="Folder cards and file imports (classic code board)"
+              onClick={() => setArchView(false)}
+            >
+              Folders
+            </button>
+            {archView && archModel && (
+              <span className="badge" title={`Heuristic: ${archModel.stats.heuristic}. Not a perfect C4 model — inferred from folders and imports.`}>
+                Inferred
+              </span>
+            )}
+            {archView && archBusy && <span className="muted" style={{ fontSize: 11 }}>Building…</span>}
+          </div>
+        )}
         <nav className="crumbs">
-          <button onClick={() => p.setFolder('')} className={folder ? '' : 'cur'}>
-            {app.vault.name}
-          </button>
-          {crumbs.map((c, i) => (
-            <span key={i}>
-              <span className="sep">›</span>
-              <button className={i === crumbs.length - 1 ? 'cur' : ''} onClick={() => p.setFolder(crumbs.slice(0, i + 1).join('/'))}>
-                {c}
+          {isArch ? (
+            <button className="cur" onClick={fit} title="Zoom to fit architecture">
+              Architecture
+            </button>
+          ) : (
+            <>
+              <button onClick={() => p.setFolder('')} className={folder ? '' : 'cur'}>
+                {app.vault.name}
               </button>
-            </span>
-          ))}
+              {crumbs.map((c, i) => (
+                <span key={i}>
+                  <span className="sep">›</span>
+                  <button className={i === crumbs.length - 1 ? 'cur' : ''} onClick={() => p.setFolder(crumbs.slice(0, i + 1).join('/'))}>
+                    {c}
+                  </button>
+                </span>
+              ))}
+            </>
+          )}
         </nav>
         <div className="r">
-          {folder && (
+          {isArch && (
+            <>
+              <button className="chipbtn" disabled={!archModel || archBusy} onClick={() => void rebuildArch()} title="Re-run inference from the indexed repo">
+                Regenerate
+              </button>
+              <button className="chipbtn" disabled={!archModel} onClick={resetArchLayout} title="Restore auto layout (keeps inferred model)">
+                Reset layout
+              </button>
+            </>
+          )}
+          {!isArch && folder && (
             <button className="chipbtn" onClick={() => p.setFolder(dirOf(folder))} title="Up one level">
               ↑ Up
             </button>
@@ -999,7 +1146,14 @@ export function BoardPane(p: Props) {
           ))}
           {marquee && <div className="marquee" style={{ left: Math.min(marquee.x0, marquee.x1), top: Math.min(marquee.y0, marquee.y1), width: Math.abs(marquee.x1 - marquee.x0), height: Math.abs(marquee.y1 - marquee.y0) }} />}
         </div>
-        {file && entries && board.nodes.length === 0 && (
+        {file && isArch && board.nodes.length === 0 && !archBusy && (
+          <div className="placeholder" style={{ pointerEvents: 'none' }}>
+            <BoardIcon size={34} />
+            <h3>No architecture yet</h3>
+            <div>Wait for indexing, or click Regenerate. Graph still shows file imports.</div>
+          </div>
+        )}
+        {file && !isArch && entries && board.nodes.length === 0 && (
           <div className="placeholder" style={{ pointerEvents: 'none' }}>
             <BoardIcon size={34} />
             <h3>This folder has no notes yet</h3>

@@ -167,6 +167,8 @@ export const IPC = {
   logCopyLast: 'log:copy-last',
   logInfo: 'log:info',
   logBootError: 'log:boot-error',
+  archGet: 'arch:get',
+  archRebuild: 'arch:rebuild',
 } as const;
 
 // ---------- M1: index / graph / notes ----------
@@ -284,3 +286,7 @@ export interface SnapshotInfo {
   fileCount: number;
   bytes: number;
 }
+
+// Architecture view (code mode) — canonical defs in arch.ts
+export type { ArchModel, ArchNode, ArchEdge, ArchCache, ArchKind, ArchHeuristic } from './arch';
+export { ARCH_BOARD_KEY } from './arch';
