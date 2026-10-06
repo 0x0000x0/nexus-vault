@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.0.7
+
+### Added
+- **Code Architecture board** — IcePanel-style nested system / app / store / component groups inferred from the repo (Electron, monorepo workspaces, web, or generic folders)
+- Board toggle **Architecture | Folders**; zoom-to-group; Reset layout; Regenerate; **Inferred** badge
+- IPC `arch:get` / `arch:rebuild`; model + layout persist under app data (`code-arch/`, `code-boards/`) only — never writes into the repo
+- Unit tests for `archinfer` + `arch-layout`
+
+### Changed
+- Code mode Board defaults to Architecture after open; Graph remains the file/folder import force view
+
+### Privacy
+- Local-only inference; architecture artifacts only in userData; no cloud; no secrets in captions
+
 ## 0.0.6
 
 ### Added

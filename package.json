@@ -1,6 +1,6 @@
 {
   "name": "nexus-vault",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Nexus Vault - Local-first knowledge management",
   "author": "Jesse Lugo",
   "license": "Apache-2.0",

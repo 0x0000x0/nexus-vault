@@ -78,6 +78,8 @@ const api: NexusApi = {
   copyLastError: inv(IPC.logCopyLast),
   logInfo: inv(IPC.logInfo),
   bootError: inv(IPC.logBootError),
+  archGet: inv(IPC.archGet),
+  archRebuild: inv(IPC.archRebuild),
 };
 
 contextBridge.exposeInMainWorld('nexus', api);

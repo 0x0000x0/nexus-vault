@@ -66,7 +66,7 @@ export function RepoDrop({ recent, busy, onOpen, onOpenRecent, onClose }: Props)
         </div>
         {err && <div className="npwarn">{err}</div>}
         <div className="muted small">
-          Strictly read-only: Nexus Vault never changes files in the repo. Zips are extracted into the app’s own data folder; board layouts are stored there too.
+          Strictly read-only: Nexus Vault never changes files in the repo. Zips are extracted into the app’s own data folder; board layouts are stored there too. After open, the Board shows a nested <b>Architecture</b> view (toggle Folders anytime).
         </div>
         {repos.length > 0 && (
           <div className="recent">

@@ -212,6 +212,25 @@ export class CodeIndex {
     }
   }
 
+  /** Indexed relative paths (read-only snapshot for architecture inference). */
+  rels(): string[] {
+    return [...this.files.keys()];
+  }
+
+  /** Resolved file→file import edges (alias of links). */
+  importEdges(): [string, string][] {
+    return this.links();
+  }
+
+  /** External packages with file-degree (for architecture externals). */
+  externalPackages(): { name: string; count: number }[] {
+    const extCount = new Map<string, number>();
+    for (const ex of this.ext.values()) for (const e of ex) extCount.set(e, (extCount.get(e) ?? 0) + 1);
+    return [...extCount.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }
+
   /** All resolved file->file links (never collapsed). */
   links(): [string, string][] {
     const out: [string, string][] = [];
