@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 export interface McpBackend {
-  search(q: string, limit: number): { rel: string; title: string; folder: string; snippet: string; score: number; startLine?: number; source?: string }[];
+  search(q: string, limit: number): Promise<{ rel: string; title: string; folder: string; snippet: string; score: number; startLine?: number; source?: string }[]> | { rel: string; title: string; folder: string; snippet: string; score: number; startLine?: number; source?: string }[];
   listNotes(): { rel: string; title: string }[];
   readNote(rel: string): Promise<string>;
   backlinks(rel: string): { rel: string; title: string; context: string }[];
@@ -193,7 +193,7 @@ export async function handleRpc(
       if (name === 'search') {
         const query = typeof arguments_?.query === 'string' ? arguments_.query : '';
         const limit = typeof arguments_?.limit === 'number' ? Math.max(1, arguments_.limit) : 10;
-        const hits = backend.search(query, limit);
+        const hits = await Promise.resolve(backend.search(query, limit));
         return {
           jsonrpc: '2.0',
           id,
@@ -255,7 +255,7 @@ export async function handleRpc(
     if (name === 'search') {
       const query = typeof arguments_?.query === 'string' ? arguments_.query : '';
       const limit = typeof arguments_?.limit === 'number' ? Math.max(1, arguments_.limit) : 10;
-      const hits = backend.search(query, limit);
+      const hits = await Promise.resolve(backend.search(query, limit));
       return {
         jsonrpc: '2.0',
         id,

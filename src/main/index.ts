@@ -62,10 +62,11 @@ const backendFactory = (): McpBackend => {
   const hidden = (rel: string) => policyFor(rel, packs()) === 'never';
   return {
     // F: citations — keyword + semantic (if enabled) merged, memory packs applied, path/snippet/startLine per hit.
-    search: (q, limit) => {
+    search: async (q, limit) => {
       const n = Math.min(50, Math.max(1, limit));
       const kw = index?.search(q, n * 2) ?? [];
-      const sem = semanticIdx && q.trim() ? semanticIdx.search(q, n * 2, SEM_MIN) : [];
+      const sem =
+        semanticIdx && q.trim() ? await semanticIdx.search(q, n * 2, SEM_MIN) : [];
       const vi = index instanceof VaultIndex ? index : null;
       return mergeCitations(kw, sem, packs(), n, (rel) => vi?.noteContent(rel)).map((c) => ({ rel: c.path, ...c }));
     },
@@ -124,19 +125,46 @@ async function startIndex(): Promise<void> {
     .catch((e) => logError('index', 'index start failed', e));
 }
 
-// ---------- B: semantic search (only built when settings.semanticSearch is on; zero cost otherwise) ----------
-const SEM_MIN = 0.08;
+// ---------- B: vector semantic search (Ollama nomic-embed-text + .nexus-vectors; OFF by default) ----------
+/** L2-normalized nomic cosine floor (was 0.08 for hashing-trick). Calibrate on sample queries. */
+const SEM_MIN = 0.38;
+const SEM_MIN_RELATED = 0.32;
+
 function buildSemantic(): void {
   dropSemantic();
   if (!(index instanceof VaultIndex)) {
     logWarn('semantic', 'semantic index skipped (not a notes VaultIndex)');
     return;
   }
-  const s = new SemanticIndex();
-  for (const n of index.allNotes()) s.upsert(n.rel, n.title, n.content);
-  index.onNote = (rel, n) => (n ? s.upsert(rel, n.title, n.content) : s.remove(rel));
-  semanticIdx = s;
-  logInfo('semantic', `semantic index built size=${s.size()}`);
+  if (!current) return;
+  const s = getSettings();
+  const idx = new SemanticIndex({
+    vaultPath: current.path,
+    userData: app.getPath('userData'),
+    model: s.embedModel,
+    baseUrl: s.embedBaseUrl,
+  });
+  const loaded = idx.load();
+  index.onNote = (rel, n) => (n ? idx.upsert(rel, n.title, n.content) : idx.remove(rel));
+  semanticIdx = idx;
+  void idx.refreshOllama().then(() => {
+    const st = idx.status();
+    logInfo('semantic', `semantic load ok=${loaded} notes=${st.indexed} chunks=${st.chunks} ollama=${st.ollama} needsRebuild=${st.needsRebuild}`);
+    // If empty index and ollama up, kick a background rebuild
+    if ((!loaded || st.indexed === 0 || st.needsRebuild) && st.ollama === 'ok' && index instanceof VaultIndex) {
+      const notes = index.allNotes().map((n) => ({ rel: n.rel, title: n.title, content: n.content }));
+      void idx
+        .rebuild(notes, (done, total) => progress('Semantic index', done, total))
+        .then(() => {
+          progress('', 0, 0);
+          logInfo('semantic', `semantic rebuild done size=${idx.size()}`);
+        })
+        .catch((e) => {
+          progress('', 0, 0);
+          logWarn('semantic', `semantic rebuild failed: ${e instanceof Error ? e.message : e}`);
+        });
+    }
+  });
 }
 function dropSemantic(): void {
   if (index instanceof VaultIndex) index.onNote = null;
@@ -144,7 +172,19 @@ function dropSemantic(): void {
   semanticIdx = null;
 }
 function semanticStatus(): SemanticStatus {
-  return { enabled: getSettings().semanticSearch, indexed: semanticIdx?.size() ?? 0 };
+  const enabled = getSettings().semanticSearch;
+  const st = semanticIdx?.status();
+  return {
+    enabled,
+    indexed: st?.indexed ?? 0,
+    chunks: st?.chunks,
+    model: st?.model ?? getSettings().embedModel,
+    ollama: st?.ollama ?? 'unknown',
+    building: st?.building,
+    progress: st?.progress,
+    needsRebuild: st?.needsRebuild,
+    indexPath: st?.indexPath,
+  };
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -509,8 +549,28 @@ function registerIpc(): void {
     } else dropSemantic();
     return semanticStatus();
   });
-  handle(IPC.semanticSearch, (_e, q: string): SemanticHit[] => (semanticIdx && typeof q === 'string' && q.trim() ? applyPolicy(semanticIdx.search(q, 20, SEM_MIN), currentPacks()) : []));
-  handle(IPC.semanticRelated, (_e, rel: string): SemanticHit[] => (semanticIdx && typeof rel === 'string' ? applyPolicy(semanticIdx.related(rel, 8, SEM_MIN), currentPacks()).slice(0, 5) : []));
+  handle(IPC.semanticSearch, async (_e, q: string): Promise<SemanticHit[]> => {
+    if (!semanticIdx || typeof q !== 'string' || !q.trim()) return [];
+    const hits = await semanticIdx.search(q, 20, SEM_MIN);
+    return applyPolicy(hits, currentPacks());
+  });
+  handle(IPC.semanticRelated, async (_e, rel: string): Promise<SemanticHit[]> => {
+    if (!semanticIdx || typeof rel !== 'string') return [];
+    const hits = await semanticIdx.related(rel, 8, SEM_MIN_RELATED);
+    return applyPolicy(hits, currentPacks()).slice(0, 5);
+  });
+  handle(IPC.semanticRebuild, async () => {
+    if (!semanticIdx || !(index instanceof VaultIndex)) return semanticStatus();
+    const notes = index.allNotes().map((n) => ({ rel: n.rel, title: n.title, content: n.content }));
+    try {
+      await semanticIdx.rebuild(notes, (done, total) => progress('Semantic index', done, total));
+      progress('', 0, 0);
+    } catch (e) {
+      progress('', 0, 0);
+      logWarn('semantic', `rebuild IPC failed: ${e instanceof Error ? e.message : e}`);
+    }
+    return semanticStatus();
+  });
   handle(IPC.getNoteInfo, (_e, rel: string) => index?.noteInfo(rel) ?? null);
   handle('index:links', () => index?.links() ?? []);
   handle(IPC.previews, (_e, rels: string[]) => index?.previews(rels) ?? {});

@@ -2,6 +2,7 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DEFAULT_LAYOUT, LIMITS, type DirEntry, type Settings } from '../shared/types';
+import { normalizeEmbedBaseUrl, normalizeEmbedModel } from './ollama-embed';
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
@@ -89,6 +90,8 @@ export function normalizeSettings(raw: unknown): Settings {
       graphLinkWidth: clamp(l.graphLinkWidth, 0.3, 3, DEFAULT_LAYOUT.graphLinkWidth),
     },
     semanticSearch: r.semanticSearch === true,
+    embedModel: normalizeEmbedModel(r.embedModel),
+    embedBaseUrl: normalizeEmbedBaseUrl(r.embedBaseUrl),
     mcp: {
       enabled: mcpEnabled,
       port: mcpPortValidated,

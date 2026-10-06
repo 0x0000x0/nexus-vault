@@ -65,6 +65,7 @@ const api: NexusApi = {
   setSemantic: inv(IPC.setSemantic),
   semanticSearch: inv(IPC.semanticSearch),
   semanticRelated: inv(IPC.semanticRelated),
+  semanticRebuild: inv(IPC.semanticRebuild),
   platform: process.platform,
   memoryGet: inv(IPC.memoryGet),
   memorySet: inv(IPC.memorySet),

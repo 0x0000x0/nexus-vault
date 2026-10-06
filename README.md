@@ -4,7 +4,7 @@
 
 Built with Electron, TypeScript, and React. Opens folders of plain Markdown notes (including vaults you already keep as `.md` files). Primary target is Windows; Linux builds work for development.
 
-> Status: early (0.0.5). Prebuilt Windows binaries are not published yet — build from source (see below).
+> Status: early (0.0.6). Prebuilt Windows binaries are not published yet — build from source (see below).
 
 ![Nexus Vault — folder tree, live graph, and note panel](screenshots/graph.png)
 
@@ -19,6 +19,11 @@ Built with Electron, TypeScript, and React. Opens folders of plain Markdown note
 ## Windows note
 
 Windows may block the unsigned installer or `.exe` (Smart App Control or SmartScreen), the same way it can with other new apps. Builds are not code-signed yet. If Windows blocks it, turn Smart App Control off (or choose Run / Allow when prompted) so you can install and try the app.
+
+## What's new in 0.0.6
+- **Real vector semantic search** — optional (OFF by default); local Ollama `nomic-embed-text`; on-disk `.nexus-vectors/` (portable Linux→Windows); Related notes uses mean of chunk vectors.
+- Prebuild on a strong machine: `npm run vectors:build -- --vault <path>` then copy `.nexus-vectors` next to the vault; PC only needs Ollama for query embed + edits.
+- Loopback-only embed URL; chunk snippets on disk capped at 500 chars.
 
 ## What's new in 0.0.5
 - **Local error log** — writes to app data (`%APPDATA%\nexus-vault\logs\nexus-vault.log` on Windows); Help → Open log folder / Copy last error; error banners with Copy details / Open log (stay until dismissed).
@@ -46,9 +51,11 @@ Windows may block the unsigned installer or `.exe` (Smart App Control or SmartSc
 
 ## Semantic search (optional, OFF by default)
 - Ctrl+K → click the **Semantic** chip → **Enable**. Results with similar meaning are added after keyword hits (tagged "similar").
-- When on, the note panel shows **Related notes** (top 5).
-- 100% local: hashing-trick embeddings computed in the app, kept in memory, no model download, no network.
-- Turn off again via the setting `semanticSearch: false` (settings.json in app data) — keyword search is unchanged either way.
+- When on, the note panel shows **Related notes** (top 5) using the mean of that note's stored chunk vectors.
+- **Requires local Ollama** with model `nomic-embed-text` on `127.0.0.1:11434` (query + indexing). No cloud embedding APIs; `embedBaseUrl` is loopback-only.
+- Index files live in `<vault>/.nexus-vectors/` (or app data if the vault is read-only). Treat them like vault content. Snapshots skip this folder.
+- Large libraries: prebuild with `npm run vectors:build -- --vault <path>` (use `--dry-run` first); copy `.nexus-vectors` to the PC vault so the app loads instead of re-embedding everything.
+- Turn off via `semanticSearch: false` in settings.json — keyword search is unchanged either way.
 
 ## Citations / Sources
 - After a Ctrl+K search, opening a result (or Ctrl+Enter) shows a **Sources** panel listing the hits with path + snippet; click to open, **Copy** to get Markdown citations.
@@ -68,7 +75,7 @@ If something fails (especially on Windows vault open), open **Help → Open log 
 
 Nexus Vault is **local-first** and **offline by design**:
 
-- No network requests of any kind (the main process blocks everything except local files)
+- No cloud network requests; optional semantic search talks only to localhost Ollama
 - No telemetry, analytics, or crash reporting; no auto-update; no accounts
 - A local error log is written to app data (never uploaded, no crash reporting)
 - Writes inside a vault: the notes you edit/create/rename/delete, backups in `.nexus-backups/`, deleted items in `.trash/`, board layout in `.nexus/board.json`

@@ -37,3 +37,9 @@ describe('citations', () => {
     expect(citeText({ path: 'a.md', title: 'A' })).toBe('[A](a.md)');
   });
 });
+
+  it('prefers hit.startLine over lineOf re-search', () => {
+    const kw = [{ rel: 'a.md', title: 'A', snippet: 'apple orchard', score: 5, startLine: 99 }];
+    const out = mergeCitations(kw, [], emptyPacks(), 5, () => content);
+    expect(out[0].startLine).toBe(99);
+  });

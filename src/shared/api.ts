@@ -60,6 +60,7 @@ export interface NexusApi {
   setSemantic(enabled: boolean): Promise<import('./types').SemanticStatus>;
   semanticSearch(q: string): Promise<import('./types').SemanticHit[]>;
   semanticRelated(rel: string): Promise<import('./types').SemanticHit[]>;
+  semanticRebuild(): Promise<import('./types').SemanticStatus>;
 
   memoryGet(): Promise<MemoryPacks>;
   memorySet(folder: string, policy: MemoryPolicy | null): Promise<MemoryPacks>;
