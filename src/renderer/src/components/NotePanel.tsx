@@ -78,7 +78,7 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
         setExternal(false);
         return true;
       }
-      app.notify(m, true);
+      app.notify(m, true, String((e as Error)?.stack ?? e));
       return false;
     }
   }, [app, readOnly]);

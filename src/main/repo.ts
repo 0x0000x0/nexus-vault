@@ -5,6 +5,7 @@ import path from 'node:path';
 import { Unzip, UnzipInflate, UnzipPassThrough } from 'fflate';
 import { CODE_EXT, extOf, looksLikeRepo } from './codeparse';
 import { isInside } from './pure';
+import { logWarn } from './logger';
 
 export async function detectRepo(dir: string): Promise<boolean> {
   let top: string[];
@@ -105,7 +106,7 @@ export async function extractZip(zipPath: string, destRoot: string, onProgress: 
     rs.on('error', reject);
   });
   await Promise.all(pendingWrites);
-  if (errors.length) console.warn('[unzip]', errors.slice(0, 20));
+  if (errors.length) logWarn('repo', `unzip: ${errors.length} problem(s)`, undefined, errors.slice(0, 20).join('; '));
   const top = (await fsp.readdir(realDest)).filter((n) => !n.startsWith('__MACOSX'));
   if (top.length === 1 && (await fsp.stat(path.join(realDest, top[0]))).isDirectory()) return path.join(realDest, top[0]);
   return realDest;

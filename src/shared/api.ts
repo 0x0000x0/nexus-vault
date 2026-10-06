@@ -68,4 +68,10 @@ export interface NexusApi {
   snapCreate(label?: string): Promise<SnapshotInfo>;
   snapRestore(id: string): Promise<{ restored: number; trashed: number; preRestoreId: string }>;
   snapDelete(id: string): Promise<void>;
+
+  reportError(e: { level?: 'WARN' | 'ERROR'; tag?: string; message: string; stack?: string }): Promise<{ code: string }>;
+  openLogFolder(): Promise<string>;
+  copyLastError(): Promise<boolean>;
+  logInfo(): Promise<{ file: string; dir: string; size: number }>;
+  bootError(): Promise<string | null>;
 }

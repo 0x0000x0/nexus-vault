@@ -29,8 +29,24 @@ import { flushSettings, getSettings, updateSettings } from './settings';
 import { countNotes, listDir, safeCopy } from './vault';
 import { isInside } from './pure';
 import { SemanticIndex } from './semantic';
+import {
+  initLogger,
+  installWebContentsHooks,
+  lastErrorText,
+  logDir,
+  logError,
+  logFilePath,
+  logInfo,
+  logWarn,
+  flushLogger,
+  reportRenderer,
+  setBootVaultError,
+  setSecret,
+  takeBootVaultError,
+} from './logger';
 
 if (process.env.NEXUS_USER_DATA) app.setPath('userData', process.env.NEXUS_USER_DATA);
+initLogger();
 
 const isDev = !app.isPackaged && !!process.env.ELECTRON_RENDERER_URL;
 let win: BrowserWindow | null = null;
@@ -100,20 +116,27 @@ async function startIndex(): Promise<void> {
   idx
     .start()
     .then(() => {
-      if (index === idx && getSettings().semanticSearch) buildSemantic();
+      if (index !== idx) return;
+      const st = idx.stats();
+      logInfo('index', `index-ready notes=${st.notes} links=${st.links} mode=${current?.mode ?? '?'}`);
+      if (getSettings().semanticSearch) buildSemantic();
     })
-    .catch((e) => console.error('[index] failed', e));
+    .catch((e) => logError('index', 'index start failed', e));
 }
 
 // ---------- B: semantic search (only built when settings.semanticSearch is on; zero cost otherwise) ----------
 const SEM_MIN = 0.08;
 function buildSemantic(): void {
   dropSemantic();
-  if (!(index instanceof VaultIndex)) return;
+  if (!(index instanceof VaultIndex)) {
+    logWarn('semantic', 'semantic index skipped (not a notes VaultIndex)');
+    return;
+  }
   const s = new SemanticIndex();
   for (const n of index.allNotes()) s.upsert(n.rel, n.title, n.content);
   index.onNote = (rel, n) => (n ? s.upsert(rel, n.title, n.content) : s.remove(rel));
   semanticIdx = s;
+  logInfo('semantic', `semantic index built size=${s.size()}`);
 }
 function dropSemantic(): void {
   if (index instanceof VaultIndex) index.onNote = null;
@@ -201,6 +224,7 @@ async function openVault(p: string, isCopy?: boolean, opts: { mode?: 'notes' | '
   startCount();
   void memoryStore.loadPacks(current).catch(() => undefined); // warm cache for MCP/semantic policy
   void startIndex();
+  logInfo('vault', `vault-open name=${current.name} mode=${mode} copy=${!!current.isCopy} readOnly=${current.readOnly}`);
   return current;
 }
 
@@ -219,24 +243,33 @@ function requireVault(root: string): string {
 }
 
 function registerIpc(): void {
-  ipcMain.handle(IPC.getSettings, () => getSettings());
-  ipcMain.handle(IPC.setTheme, (_e, t: ThemePref) => {
+  const handle = (ch: string, fn: (...a: any[]) => any) =>
+    ipcMain.handle(ch, async (e, ...args) => {
+      try {
+        return await fn(e, ...args);
+      } catch (err) {
+        logError('ipc', `${ch} failed`, err);
+        throw err;
+      }
+    });
+  handle(IPC.getSettings, () => getSettings());
+  handle(IPC.setTheme, (_e, t: ThemePref) => {
     const s = updateSettings({ theme: t });
     nativeTheme.themeSource = s.theme;
     return s.theme;
   });
-  ipcMain.handle(IPC.setLayout, (_e, l: Partial<LayoutSettings>) => updateSettings({ layout: { ...getSettings().layout, ...l } }).layout);
-  ipcMain.handle(IPC.getRecent, (): RecentVaultView[] => getSettings().recentVaults.map((r) => ({ ...r, exists: fs.existsSync(r.path) })));
-  ipcMain.handle(IPC.removeRecent, (_e, p: string) => {
+  handle(IPC.setLayout, (_e, l: Partial<LayoutSettings>) => updateSettings({ layout: { ...getSettings().layout, ...l } }).layout);
+  handle(IPC.getRecent, (): RecentVaultView[] => getSettings().recentVaults.map((r) => ({ ...r, exists: fs.existsSync(r.path) })));
+  handle(IPC.removeRecent, (_e, p: string) => {
     updateSettings({ recentVaults: getSettings().recentVaults.filter((r) => r.path !== p) });
   });
-  ipcMain.handle(IPC.pickFolder, async (_e, title: string) => {
+  handle(IPC.pickFolder, async (_e, title: string) => {
     const r = win
       ? await dialog.showOpenDialog(win, { title, properties: ['openDirectory'] })
       : await dialog.showOpenDialog({ title, properties: ['openDirectory'] });
     return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
   });
-  ipcMain.handle(IPC.confirmReal, async (_e, p: string) => {
+  handle(IPC.confirmReal, async (_e, p: string) => {
     if (await detectRepo(p)) return 'real'; // code repos open read-only; no copy needed
     const opts = {
       type: 'warning' as const,
@@ -252,28 +285,29 @@ function registerIpc(): void {
     const r = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
     return (['real', 'copy', 'cancel'] as const)[r.response] ?? 'cancel';
   });
-  ipcMain.handle(IPC.openVault, (_e, p: string) => openVault(p));
-  ipcMain.handle(IPC.safeCopy, async (_e, src: string) => {
+  handle(IPC.openVault, (_e, p: string) => openVault(p));
+  handle(IPC.safeCopy, async (_e, src: string) => {
     const dest = await safeCopy(src, copiesRoot());
+    logInfo('vault', 'safe-copy created');
     return openVault(dest, true);
   });
-  ipcMain.handle(IPC.closeVault, () => closeVault());
-  ipcMain.handle(IPC.getCurrent, () => {
+  handle(IPC.closeVault, () => closeVault());
+  handle(IPC.getCurrent, () => {
     if (current) startCount(); // renderer just (re)loaded: send a fresh count
     return current;
   });
-  ipcMain.handle(IPC.listDir, (_e, root: string, rel: string) => listDir(requireVault(root), rel));
-  ipcMain.handle(IPC.memoryGet, async () => {
+  handle(IPC.listDir, (_e, root: string, rel: string) => listDir(requireVault(root), rel));
+  handle(IPC.memoryGet, async () => {
     if (!current) return emptyPacks();
     return memoryStore.loadPacks(current);
   });
-  ipcMain.handle(IPC.memorySet, async (_e, folder: string, policy: MemoryPolicy | null) => {
+  handle(IPC.memorySet, async (_e, folder: string, policy: MemoryPolicy | null) => {
     if (!current) return emptyPacks();
     const cur = await memoryStore.loadPacks(current);
     return memoryStore.savePacks(current, setPolicy(cur, folder, policy));
   });
 
-  ipcMain.handle('mcp:status', () => {
+  handle('mcp:status', () => {
     const s = getSettings().mcp;
     const st = mcpStatus();
     return {
@@ -286,7 +320,7 @@ function registerIpc(): void {
       error: st.error,
     };
   });
-  ipcMain.handle('mcp:set', async (_e, patch: { enabled?: boolean; readOnly?: boolean; port?: number }) => {
+  handle('mcp:set', async (_e, patch: { enabled?: boolean; readOnly?: boolean; port?: number }) => {
     const s = getSettings();
     let token = s.mcp.token;
     const enabled = patch.enabled !== undefined ? !!patch.enabled : s.mcp.enabled;
@@ -298,6 +332,7 @@ function registerIpc(): void {
       readOnly: patch.readOnly !== undefined ? !!patch.readOnly : s.mcp.readOnly,
     };
     updateSettings({ mcp: ps });
+    setSecret('token', ps.token);
     stopMcp();
     mcpStarted = false;
     if (ps.enabled) {
@@ -315,11 +350,12 @@ function registerIpc(): void {
       error: st.error,
     };
   });
-  ipcMain.handle('mcp:regen-token', () => {
+  handle('mcp:regen-token', () => {
     const s = getSettings();
     const token = newToken();
     const ps = { ...s.mcp, token };
     updateSettings({ mcp: ps });
+    setSecret('token', token);
     if (ps.enabled) {
       stopMcp();
       startMcp(backendFactory, ps);
@@ -337,7 +373,7 @@ function registerIpc(): void {
     };
   });
 
-  ipcMain.handle(IPC.snapList, async () => {
+  handle(IPC.snapList, async () => {
     if (!current) return [];
     if (current.readOnly) {
       const h = crypto.createHash('sha1').update(current.path.toLowerCase()).digest('hex');
@@ -345,7 +381,7 @@ function registerIpc(): void {
     }
     return listSnapshots(current.path);
   });
-  ipcMain.handle(IPC.snapCreate, async (_e, label?: string) => {
+  handle(IPC.snapCreate, async (_e, label?: string) => {
     if (!current) throw new Error('No vault is open');
     const sendProg = (done: number, total: number) => {
       for (const w of BrowserWindow.getAllWindows()) w.webContents.send(IPC.evProgress, { label: label || 'Snapshot', done, total });
@@ -365,7 +401,7 @@ function registerIpc(): void {
     }
     return createSnapshot(current.path, label, sendProg);
   });
-  ipcMain.handle(IPC.snapRestore, async (_e, id: string) => {
+  handle(IPC.snapRestore, async (_e, id: string) => {
     if (!current) throw new Error('No vault is open');
     if (current.readOnly) {
       const h = crypto.createHash('sha1').update(current.path.toLowerCase()).digest('hex');
@@ -381,7 +417,7 @@ function registerIpc(): void {
     }
     return restoreSnapshot(current.path, id);
   });
-  ipcMain.handle(IPC.snapDelete, async (_e, id: string) => {
+  handle(IPC.snapDelete, async (_e, id: string) => {
     if (!current) throw new Error('No vault is open');
     if (current.readOnly) {
       const h = crypto.createHash('sha1').update(current.path.toLowerCase()).digest('hex');
@@ -400,23 +436,23 @@ function registerIpc(): void {
     if (current?.readOnly) throw new Error('This is a read-only code repo. Nexus Vault never modifies repo files.');
     return v();
   };
-  ipcMain.handle(IPC.readNote, (_e, rel: string) => ops.readNote(v(), rel));
-  ipcMain.handle(IPC.writeNote, async (_e, rel: string, content: string, mtime?: number) => {
+  handle(IPC.readNote, (_e, rel: string) => ops.readNote(v(), rel));
+  handle(IPC.writeNote, async (_e, rel: string, content: string, mtime?: number) => {
     const r = await ops.writeNote(vw(), rel, content, mtime);
     index?.touch(rel);
     return r;
   });
-  ipcMain.handle(IPC.createNote, async (_e, dir: string, name: string | null, content?: string) => {
+  handle(IPC.createNote, async (_e, dir: string, name: string | null, content?: string) => {
     const rel = await ops.createNote(vw(), dir, name, content ?? '');
     index?.touch(rel);
     return rel;
   });
-  ipcMain.handle(IPC.createFolder, async (_e, dir: string, name: string | null) => {
+  handle(IPC.createFolder, async (_e, dir: string, name: string | null) => {
     const rel = await ops.createFolder(vw(), dir, name);
     index?.touchDir(rel);
     return rel;
   });
-  ipcMain.handle(IPC.renamePath, async (_e, rel: string, name: string) => {
+  handle(IPC.renamePath, async (_e, rel: string, name: string) => {
     const root = vw();
     const isDir = (await fs.promises.stat(await resolveInVault(root, rel))).isDirectory();
     const nrel = await ops.renamePath(root, rel, name);
@@ -430,7 +466,7 @@ function registerIpc(): void {
     }
     return nrel;
   });
-  ipcMain.handle(IPC.deletePath, async (_e, rel: string) => {
+  handle(IPC.deletePath, async (_e, rel: string) => {
     const root = vw();
     const abs = await resolveInVault(root, rel);
     const isDir = (await fs.promises.stat(abs)).isDirectory();
@@ -451,37 +487,37 @@ function registerIpc(): void {
     else index?.touch(rel, 'remove');
     return to;
   });
-  ipcMain.handle(IPC.duplicatePath, async (_e, rel: string) => {
+  handle(IPC.duplicatePath, async (_e, rel: string) => {
     const nrel = await ops.duplicatePath(vw(), rel);
     index?.touch(nrel);
     index?.touchDir(nrel);
     return nrel;
   });
-  ipcMain.handle(IPC.revealPath, async (_e, rel: string) => shell.showItemInFolder(await resolveInVault(v(), rel)));
-  ipcMain.handle(IPC.copyPath, async (_e, rel: string) => {
+  handle(IPC.revealPath, async (_e, rel: string) => shell.showItemInFolder(await resolveInVault(v(), rel)));
+  handle(IPC.copyPath, async (_e, rel: string) => {
     const abs = await resolveInVault(v(), rel);
     clipboard.writeText(abs);
     return abs;
   });
-  ipcMain.handle(IPC.getGraph, () => index?.graph() ?? { nodes: [], links: [], version: -1 });
-  ipcMain.handle(IPC.search, (_e, q: string) => index?.search(q) ?? []);
-  ipcMain.handle(IPC.semanticStatus, () => semanticStatus());
-  ipcMain.handle(IPC.setSemantic, (_e, enabled: boolean) => {
+  handle(IPC.getGraph, () => index?.graph() ?? { nodes: [], links: [], version: -1 });
+  handle(IPC.search, (_e, q: string) => index?.search(q) ?? []);
+  handle(IPC.semanticStatus, () => semanticStatus());
+  handle(IPC.setSemantic, (_e, enabled: boolean) => {
     updateSettings({ semanticSearch: enabled === true });
     if (enabled === true) {
       if (!semanticIdx && index instanceof VaultIndex && index.ready) buildSemantic();
     } else dropSemantic();
     return semanticStatus();
   });
-  ipcMain.handle(IPC.semanticSearch, (_e, q: string): SemanticHit[] => (semanticIdx && typeof q === 'string' && q.trim() ? applyPolicy(semanticIdx.search(q, 20, SEM_MIN), currentPacks()) : []));
-  ipcMain.handle(IPC.semanticRelated, (_e, rel: string): SemanticHit[] => (semanticIdx && typeof rel === 'string' ? applyPolicy(semanticIdx.related(rel, 8, SEM_MIN), currentPacks()).slice(0, 5) : []));
-  ipcMain.handle(IPC.getNoteInfo, (_e, rel: string) => index?.noteInfo(rel) ?? null);
-  ipcMain.handle('index:links', () => index?.links() ?? []);
-  ipcMain.handle(IPC.previews, (_e, rels: string[]) => index?.previews(rels) ?? {});
-  ipcMain.handle(IPC.listNotes, () => ({ notes: index?.listNotes() ?? [], stats: index?.stats() ?? null, ready: !!index?.ready }));
-  ipcMain.handle(IPC.readBoard, () => (current?.readOnly ? ops.readBoardAt(codeBoardFile(current.path)) : ops.readBoard(v())));
-  ipcMain.handle(IPC.writeBoard, (_e, data: BoardFile) => (current?.readOnly ? ops.writeBoardAt(codeBoardFile(current.path), data) : ops.writeBoard(v(), data)));
-  ipcMain.handle('vault:pick-repo', async (_e, kind: 'folder' | 'zip') => {
+  handle(IPC.semanticSearch, (_e, q: string): SemanticHit[] => (semanticIdx && typeof q === 'string' && q.trim() ? applyPolicy(semanticIdx.search(q, 20, SEM_MIN), currentPacks()) : []));
+  handle(IPC.semanticRelated, (_e, rel: string): SemanticHit[] => (semanticIdx && typeof rel === 'string' ? applyPolicy(semanticIdx.related(rel, 8, SEM_MIN), currentPacks()).slice(0, 5) : []));
+  handle(IPC.getNoteInfo, (_e, rel: string) => index?.noteInfo(rel) ?? null);
+  handle('index:links', () => index?.links() ?? []);
+  handle(IPC.previews, (_e, rels: string[]) => index?.previews(rels) ?? {});
+  handle(IPC.listNotes, () => ({ notes: index?.listNotes() ?? [], stats: index?.stats() ?? null, ready: !!index?.ready }));
+  handle(IPC.readBoard, () => (current?.readOnly ? ops.readBoardAt(codeBoardFile(current.path)) : ops.readBoard(v())));
+  handle(IPC.writeBoard, (_e, data: BoardFile) => (current?.readOnly ? ops.writeBoardAt(codeBoardFile(current.path), data) : ops.writeBoard(v(), data)));
+  handle('vault:pick-repo', async (_e, kind: 'folder' | 'zip') => {
     const opts =
       kind === 'zip'
         ? { title: 'Choose a repo .zip (e.g. GitHub "Download ZIP")', properties: ['openFile' as const], filters: [{ name: 'Zip archives', extensions: ['zip'] }] }
@@ -489,17 +525,18 @@ function registerIpc(): void {
     const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
   });
-  ipcMain.handle(IPC.openCode, async (_e, p: string) => {
+  handle(IPC.openCode, async (_e, p: string) => {
     const st = await fs.promises.stat(p);
     if (st.isFile()) {
       if (!/\.zip$/i.test(p)) throw new Error('Drop a folder or a .zip file');
       progress('Extracting zip…', 0, st.size);
       const dir = await extractZip(p, reposRoot(), (d, t) => progress('Extracting zip…', d, t));
+      logInfo('repo', 'zip extracted', undefined, dir);
       return openVault(dir, false, { mode: 'code', source: p });
     }
     return openVault(p, false, { mode: 'code' });
   });
-  ipcMain.handle(IPC.pickImage, async () => {
+  handle(IPC.pickImage, async () => {
     const opts = { title: 'Choose an image', properties: ['openFile' as const], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'] }] };
     const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     if (r.canceled || !r.filePaths[0]) return null;
@@ -507,13 +544,13 @@ function registerIpc(): void {
     index?.touchDir(rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '');
     return rel;
   });
-  ipcMain.handle(IPC.readImage, (_e, rel: string) => ops.readImage(v(), rel));
-  ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
+  handle(IPC.readImage, (_e, rel: string) => ops.readImage(v(), rel));
+  handle(IPC.openExternal, async (_e, url: string) => {
     // Only on explicit user action (double-click on a link card); opens the system browser, not the app.
     if (!/^https?:\/\//i.test(url)) throw new Error('Only http(s) links can be opened');
     await shell.openExternal(url);
   });
-  ipcMain.handle(IPC.addConnection, async (_e, src: string, target: string, label?: string) => {
+  handle(IPC.addConnection, async (_e, src: string, target: string, label?: string) => {
     const root = vw();
     if (!(index instanceof VaultIndex)) throw new Error('Index not ready');
     const note = await ops.readNote(root, src);
@@ -522,7 +559,7 @@ function registerIpc(): void {
     index.touch(src);
     return true;
   });
-  ipcMain.handle(IPC.removeConnection, async (_e, src: string, target: string) => {
+  handle(IPC.removeConnection, async (_e, src: string, target: string) => {
     const root = vw();
     if (!(index instanceof VaultIndex)) throw new Error('Index not ready');
     const note = await ops.readNote(root, src);
@@ -532,6 +569,30 @@ function registerIpc(): void {
     index.touch(src);
     return true;
   });
+
+  handle(IPC.logReport, (_e, payload: { level?: string; tag?: string; message: string; stack?: string }) =>
+    reportRenderer(payload ?? { message: '' }),
+  );
+  handle(IPC.logOpenFolder, async () => {
+    await shell.openPath(logDir());
+    return logDir();
+  });
+  handle(IPC.logCopyLast, () => {
+    const text = lastErrorText() || 'No errors recorded in this session.';
+    clipboard.writeText(text);
+    return true;
+  });
+  handle(IPC.logInfo, () => {
+    const file = logFilePath();
+    let size = 0;
+    try {
+      size = fs.statSync(file).size;
+    } catch {
+      size = 0;
+    }
+    return { file, dir: logDir(), size };
+  });
+  handle(IPC.logBootError, () => takeBootVaultError());
 }
 
 function buildMenu(): void {
@@ -552,8 +613,24 @@ function buildMenu(): void {
               type: 'info',
               title: 'About Nexus Vault',
               message: `Nexus Vault ${app.getVersion()}`,
-              detail: 'Local-first. No account, no network, no telemetry.\nLicense: Apache-2.0\nCopyright 2026 Jesse Lugo',
+              detail:
+                'Local-first. No account, no network, no telemetry.\nLicense: Apache-2.0\nCopyright 2026 Jesse Lugo\n\nError log: ' +
+                logFilePath() +
+                ' (local only, never uploaded)',
             }),
+        },
+        { type: 'separator' },
+        {
+          label: 'Open log folder',
+          click: () => {
+            void shell.openPath(logDir());
+          },
+        },
+        {
+          label: 'Copy last error',
+          click: () => {
+            clipboard.writeText(lastErrorText() || 'No errors recorded in this session.');
+          },
         },
       ],
     },
@@ -566,7 +643,7 @@ function lockDownNetwork(): void {
   session.defaultSession.webRequest.onBeforeRequest((details, cb) => {
     const u = details.url;
     const ok = u.startsWith('file:') || u.startsWith('devtools:') || u.startsWith('data:') || u.startsWith('blob:') || (isDev && !!devUrl && (u.startsWith(devUrl) || u.startsWith(devUrl.replace('http', 'ws'))));
-    if (!ok) console.warn('[blocked request]', u);
+    if (!ok) logWarn('network', 'blocked request', undefined, u);
     cb({ cancel: !ok });
   });
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
@@ -601,6 +678,7 @@ function createWindow(): void {
   win.webContents.on('will-navigate', (e, url) => {
     if (!(isDev && process.env.ELECTRON_RENDERER_URL && url.startsWith(process.env.ELECTRON_RENDERER_URL))) e.preventDefault();
   });
+  installWebContentsHooks(win.webContents, 'window');
 
   win.once('ready-to-show', showAndFocus);
   // Fallback: never stay invisible if ready-to-show is missed.
@@ -631,7 +709,6 @@ function createWindow(): void {
 /** Test-only hook: run JS steps (";;"-separated; "SHOT <path>" captures, "WAIT <ms>" sleeps), then quit. */
 function setupScreenshot(w: BrowserWindow, out: string): void {
   w.webContents.on('console-message', (e) => console.log('[renderer]', e.level, e.message));
-  w.webContents.on('preload-error', (_e, p, err) => console.log('[preload-error]', p, err));
   w.webContents.once('did-finish-load', async () => {
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const shot = async (file: string) => {
@@ -663,6 +740,10 @@ function setupScreenshot(w: BrowserWindow, out: string): void {
 }
 
 app.whenReady().then(async () => {
+  logInfo(
+    'app',
+    `app-start version=${app.getVersion()} electron=${process.versions.electron} chrome=${process.versions.chrome} node=${process.versions.node} platform=${process.platform} arch=${process.arch} packaged=${app.isPackaged} userData=${logDir()}`,
+  );
   nativeTheme.themeSource = getSettings().theme;
   nativeTheme.on('updated', () => win?.webContents.send(IPC.evSystemTheme, nativeTheme.shouldUseDarkColors ? 'dark' : 'light'));
   lockDownNetwork();
@@ -672,16 +753,25 @@ app.whenReady().then(async () => {
     const s = getSettings().mcp;
     const token = s.token || newToken();
     if (!s.token) updateSettings({ mcp: { ...s, token } });
+    setSecret('token', token);
     startMcp(backendFactory, { ...getSettings().mcp, token });
     mcpStarted = true;
+  } else if (getSettings().mcp.token) {
+    setSecret('token', getSettings().mcp.token);
   }
   buildMenu();
   const startPath = process.env.NEXUS_VAULT_OPEN || getSettings().lastVaultPath;
-  if (startPath && fs.existsSync(startPath)) {
-    try {
-      await openVault(startPath);
-    } catch {
-      current = null;
+  if (startPath) {
+    if (fs.existsSync(startPath)) {
+      try {
+        await openVault(startPath);
+      } catch (e) {
+        current = null;
+        logError('vault', 'startup vault-open failed', e);
+        setBootVaultError(e instanceof Error ? e.message : String(e));
+      }
+    } else {
+      logWarn('vault', `startup vault path missing: (redacted)`);
     }
   }
   createWindow();
@@ -693,5 +783,6 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   flushSettings();
+  flushLogger();
   app.quit();
 });

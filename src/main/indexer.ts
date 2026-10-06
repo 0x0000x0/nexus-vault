@@ -6,6 +6,7 @@ import { watch, type FSWatcher } from 'chokidar';
 import MiniSearch from 'minisearch';
 import type { FsChange, GraphData, GraphNode, IndexStats, LinkRef, NoteInfo, SearchHit } from '../shared/types';
 import { norm, parseNote, resolveTarget, titleOf, type ParsedNote } from './parse';
+import { logWarn } from './logger';
 
 interface NoteRec {
   rel: string;
@@ -103,7 +104,7 @@ export class VaultIndex {
       for (const k of this.notes.keys()) if (k.startsWith(rel + '/')) this.pending.set(k, 'remove');
       q('dir')(abs);
     });
-    this.watcher.on('error', (e) => console.warn('[watcher]', e));
+    this.watcher.on('error', (e) => logWarn('watch', 'chokidar watcher error', e));
   }
 
   /** Tell the index a file changed right now (used after our own writes so UI updates instantly). */

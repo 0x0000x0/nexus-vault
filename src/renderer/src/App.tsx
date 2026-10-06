@@ -17,6 +17,7 @@ import { Snapshots } from './components/Snapshots';
 import { ToolStrip } from './components/ToolStrip';
 import { VaultPicker } from './components/VaultPicker';
 import { Ctx, dirOf, errMsg, type AppActions } from './ctx';
+import { shortCode } from '../../shared/log-format';
 import { back as navBack, canBack, canForward, createNav, forward as navForward, push as navPush, replace as navReplace, type Cam, type NavSnap, type NavState } from './nav-history';
 
 const nexus = window.nexus;
@@ -33,7 +34,7 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [noteCount, setNoteCount] = useState<{ count: number; done: boolean } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [banner, setBanner] = useState<{ text: string; err?: boolean } | null>(null);
+  const [banner, setBanner] = useState<{ text: string; err?: boolean; code?: string; detail?: string } | null>(null);
   const [graph, setGraph] = useState<GraphData>(EMPTY_GRAPH);
   const [stats, setStats] = useState<IndexStats | null>(null);
   const [openRel, setOpenRel] = useState<string | null>(null);
@@ -110,6 +111,12 @@ export function App() {
       setRecent(await nexus.getRecent());
       setVault(await nexus.getCurrent());
       setReady(true);
+      try {
+        const boot = await nexus.bootError();
+        if (boot) setBanner({ text: `Could not open last vault: ${boot}`, err: true, code: shortCode(boot) });
+      } catch {
+        /* ignore */
+      }
     })();
     const offCount = nexus.onNoteCount((n) => setNoteCount({ count: n.count, done: n.done }));
     const offTheme = nexus.onSystemTheme(() => setSystemDark(darkQuery.matches));
@@ -176,10 +183,15 @@ export function App() {
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
 
-  const notify = useCallback((text: string, err?: boolean) => {
-    setBanner({ text, err });
+  const notify = useCallback((text: string, err?: boolean, detail?: string, opts?: { skipLog?: boolean }) => {
+    const code = err ? shortCode(text) : undefined;
+    setBanner({ text, err, code, detail });
     if (bannerTimer.current) window.clearTimeout(bannerTimer.current);
-    bannerTimer.current = window.setTimeout(() => setBanner(null), err ? 9000 : 4500);
+    // CoS: error banners stay until dismissed; success auto-hides.
+    if (!err) bannerTimer.current = window.setTimeout(() => setBanner(null), 4500);
+    if (err && !opts?.skipLog) {
+      void nexus.reportError({ level: 'ERROR', tag: 'notify', message: text, stack: detail }).catch(() => undefined);
+    }
   }, []);
 
   // Record history: folder drill / opening a note / "show in graph|board" push a new entry;
@@ -279,7 +291,8 @@ export function App() {
     try {
       await f();
     } catch (e) {
-      setBanner({ text: errMsg(e), err: true });
+      // IPC handle() already logged; skipLog avoids double ERROR lines (CoS).
+      notify(errMsg(e), true, String((e as Error)?.stack ?? e), { skipLog: true });
     } finally {
       setBusy(null);
     }
@@ -371,7 +384,7 @@ export function App() {
           if (!layoutRef.current.notePanelOpen) setLayout({ notePanelOpen: true });
           return rel;
         } catch (e) {
-          notify(errMsg(e), true);
+          notify(errMsg(e), true, String((e as Error)?.stack ?? e));
           return null;
         }
       },
@@ -381,7 +394,7 @@ export function App() {
         try {
           return await nexus.createFolder(dir, name);
         } catch (e) {
-          notify(errMsg(e), true);
+          notify(errMsg(e), true, String((e as Error)?.stack ?? e));
           return null;
         }
       },
@@ -472,6 +485,23 @@ export function App() {
         {!vault && banner && (
           <div className={`banner${banner.err ? ' err' : ''}`} style={{ top: 52 }}>
             <span>{banner.text}</span>
+            {banner.err && (
+              <>
+                <button
+                  className="act"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(banner.text + (banner.detail ? '\n' + banner.detail : ''));
+                    notify('Error details copied');
+                  }}
+                >
+                  Copy details
+                </button>
+                <button className="act" onClick={() => void nexus.openLogFolder()}>
+                  Open log
+                </button>
+                {banner.code && <span className="code">({banner.code})</span>}
+              </>
+            )}
             <button onClick={() => setBanner(null)} title="Dismiss">✕</button>
           </div>
         )}
@@ -503,6 +533,23 @@ export function App() {
               {banner && (
                 <div className={`banner${banner.err ? ' err' : ''}`}>
                   <span>{banner.text}</span>
+                  {banner.err && (
+                    <>
+                      <button
+                        className="act"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(banner.text + (banner.detail ? '\n' + banner.detail : ''));
+                          notify('Error details copied');
+                        }}
+                      >
+                        Copy details
+                      </button>
+                      <button className="act" onClick={() => void nexus.openLogFolder()}>
+                        Open log
+                      </button>
+                      {banner.code && <span className="code">({banner.code})</span>}
+                    </>
+                  )}
                   <button onClick={() => setBanner(null)} title="Dismiss">✕</button>
                 </div>
               )}

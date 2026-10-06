@@ -1,5 +1,6 @@
 // Welcome screen / vault picker shown when no vault is open (Grok Bot).
 import type { RecentVaultView } from '../../../shared/types';
+import pkg from '../../../../package.json';
 import { CodeIcon, CopyIcon, FolderOpenIcon, Logo } from './icons';
 
 interface Props {
@@ -81,6 +82,21 @@ export function VaultPicker({ recent: all, busy, onOpenCopy, onOpenReal, onOpenR
             ))}
           </div>
         )}
+        <div className="muted" style={{ marginTop: 14, fontSize: 12, textAlign: 'center' }}>
+          Troubleshooting:{' '}
+          <button type="button" className="linkbtn" onClick={() => void window.nexus.openLogFolder()}>
+            Open log folder
+          </button>
+          {' · '}
+          <button
+            type="button"
+            className="linkbtn"
+            onClick={() => void window.nexus.copyLastError().then(() => undefined)}
+          >
+            Copy last error
+          </button>
+          <div style={{ marginTop: 4 }}>v{pkg.version}</div>
+        </div>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 // Localhost MCP HTTP server (127.0.0.1 only). Grok Bot.
 import { createServer, type Server } from 'node:http';
 import { checkRequest, handleRpc, newToken, type McpBackend } from './mcp-core';
+import { logError } from './logger';
 
 export { newToken };
 
@@ -128,6 +129,7 @@ export function startMcp(
       }
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
+      logError('mcp', 'request failed', e);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Internal error' }));
     }
@@ -138,6 +140,7 @@ export function startMcp(
   });
   server.on('error', (e) => {
     lastError = e instanceof Error ? e.message : String(e);
+    logError('mcp', `server error on 127.0.0.1:${port}`, e);
     server = null;
   });
 }
