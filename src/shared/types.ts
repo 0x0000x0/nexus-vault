@@ -157,6 +157,11 @@ export const IPC = {
   snapCreate: 'snap:create',
   snapRestore: 'snap:restore',
   snapDelete: 'snap:delete',
+  logReport: 'log:report',
+  logOpenFolder: 'log:open-folder',
+  logCopyLast: 'log:copy-last',
+  logInfo: 'log:info',
+  logBootError: 'log:boot-error',
 } as const;
 
 // ---------- M1: index / graph / notes ----------

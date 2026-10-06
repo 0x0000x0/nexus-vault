@@ -4,7 +4,7 @@
 
 Built with Electron, TypeScript, and React. Opens folders of plain Markdown notes (including vaults you already keep as `.md` files). Primary target is Windows; Linux builds work for development.
 
-> Status: early (0.0.x). Prebuilt Windows binaries are not published yet — build from source (see below).
+> Status: early (0.0.5). Prebuilt Windows binaries are not published yet — build from source (see below).
 
 ![Nexus Vault — folder tree, live graph, and note panel](screenshots/graph.png)
 
@@ -19,6 +19,10 @@ Built with Electron, TypeScript, and React. Opens folders of plain Markdown note
 ## Windows note
 
 Windows may block the unsigned installer or `.exe` (Smart App Control or SmartScreen), the same way it can with other new apps. Builds are not code-signed yet. If Windows blocks it, turn Smart App Control off (or choose Run / Allow when prompted) so you can install and try the app.
+
+## What's new in 0.0.5
+- **Local error log** — writes to app data (`%APPDATA%\nexus-vault\logs\nexus-vault.log` on Windows); Help → Open log folder / Copy last error; error banners with Copy details / Open log (stay until dismissed).
+- **Big-vault graph** — large vaults open zoomed on a dense cluster (not tiny fit-all); click a legend folder to focus; Fit still fits everything (or the focused folder); clearer labels + auto node scale.
 
 ## What's new in 0.0.4
 - **Back / Forward** on Board + Graph (Alt+Left/Right, mouse back/forward buttons) — restores folder, pan/zoom, graph camera, selection and open note.
@@ -51,12 +55,22 @@ Windows may block the unsigned installer or `.exe` (Smart App Control or SmartSc
 - MCP `search` returns keyword + semantic hits (when semantic is on), each with `path`, `title`, `snippet`, `startLine`, `source` and a ready-made `cite` link.
 - Memory packs apply to AI-facing results: **Never include** folders are dropped from MCP search/list/backlinks, `get_note`/`append_note` refuse them, and semantic results/Related notes skip them; **Always include** folders rank first.
 
+## Troubleshooting / error log
+
+If something fails (especially on Windows vault open), open **Help → Open log folder** or use **Copy last error**.
+
+- Windows path: `%APPDATA%\nexus-vault\logs\nexus-vault.log` (also `nexus-vault.1.log` / `.2.log` after rotation, ~1 MB each)
+- Never uploaded; no crash-reporting service
+- Redacted: MCP bearer tokens, Authorization headers, secrets, home folder as `~`, email addresses
+- Note **content** is never written to the log
+
 ## Privacy Statement
 
 Nexus Vault is **local-first** and **offline by design**:
 
 - No network requests of any kind (the main process blocks everything except local files)
 - No telemetry, analytics, or crash reporting; no auto-update; no accounts
+- A local error log is written to app data (never uploaded, no crash reporting)
 - Writes inside a vault: the notes you edit/create/rename/delete, backups in `.nexus-backups/`, deleted items in `.trash/`, board layout in `.nexus/board.json`
 - Code repos are never written to
 - Link cards open in your system browser only when you double-click and confirm

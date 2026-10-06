@@ -4,6 +4,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { Settings } from '../shared/types';
 import { normalizeSettings } from './pure';
+import { logError } from './logger';
 
 let cache: Settings | null = null;
 let writeTimer: NodeJS.Timeout | null = null;
@@ -45,6 +46,6 @@ export function flushSettings(): void {
     fs.writeFileSync(tmp, JSON.stringify(cache, null, 2), 'utf8');
     fs.renameSync(tmp, file());
   } catch (err) {
-    console.error('Failed to save settings', err);
+    logError('settings', 'failed to save settings.json', err);
   }
 }

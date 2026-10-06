@@ -89,7 +89,7 @@ export function BoardPane(p: Props) {
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = null;
     const f = fileRef.current;
-    if (f) window.nexus.writeBoard(f).catch((e) => app.notify('Could not save board: ' + errMsg(e), true));
+    if (f) window.nexus.writeBoard(f).catch((e) => app.notify('Could not save board: ' + errMsg(e), true, String((e as Error)?.stack ?? e)));
   }, [app]);
   useEffect(() => () => flush(), [flush]);
 
@@ -316,7 +316,7 @@ export function BoardPane(p: Props) {
         addNode({ type: 'link', url, text: '', x: pt.x - CARD.link.w / 2, y: pt.y - 30, w: CARD.link.w, h: CARD.link.h });
       }
     } catch (e) {
-      app.notify(errMsg(e), true);
+      app.notify(errMsg(e), true, String((e as Error)?.stack ?? e));
     }
   };
   const lastTool = useRef(0);
@@ -402,7 +402,7 @@ export function BoardPane(p: Props) {
             const changed = await window.nexus.removeConnection(a.file, b.file);
             app.notify(changed ? `Removed link to "${noteTitle(b.file)}" from "${noteTitle(a.file)}" (text kept, backup saved).` : 'Link was already gone.');
           } catch (err) {
-            app.notify(errMsg(err), true);
+            app.notify(errMsg(err), true, String((err as Error)?.stack ?? err));
           }
         }
         update((bd) => ({ ...bd, edges: bd.edges.filter((x) => !(x.link && x.from === e.from && x.to === e.to)) }));
@@ -437,7 +437,7 @@ export function BoardPane(p: Props) {
         app.notify(added ? `Added [[${noteTitle(b.file)}]] to "${noteTitle(a.file)}" under ## Connections (backup saved).` : `"${noteTitle(a.file)}" already links to "${noteTitle(b.file)}".`);
       } catch (err) {
         setPending((pp) => pp.filter((x) => x.id !== 'L:' + key));
-        app.notify(errMsg(err), true);
+        app.notify(errMsg(err), true, String((err as Error)?.stack ?? err));
       }
       return;
     }
@@ -599,7 +599,7 @@ export function BoardPane(p: Props) {
     if (n.type === 'folder' && n.file !== undefined) p.setFolder(n.file);
     else if (n.type === 'note' && n.file) app.openNote(n.file);
     else if (n.type === 'text' || n.type === 'group') setEditing(n.id);
-    else if (n.type === 'link' && n.url && window.confirm(`Open in your web browser?\n\n${n.url}`)) void window.nexus.openExternal(n.url).catch((e) => app.notify(errMsg(e), true));
+    else if (n.type === 'link' && n.url && window.confirm(`Open in your web browser?\n\n${n.url}`)) void window.nexus.openExternal(n.url).catch((e) => app.notify(errMsg(e), true, String((e as Error)?.stack ?? e)));
     else if (n.type === 'image' && n.file) app.select(n.file);
   };
 

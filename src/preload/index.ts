@@ -72,6 +72,11 @@ const api: NexusApi = {
   snapCreate: inv(IPC.snapCreate),
   snapRestore: inv(IPC.snapRestore),
   snapDelete: inv(IPC.snapDelete),
+  reportError: inv(IPC.logReport),
+  openLogFolder: inv(IPC.logOpenFolder),
+  copyLastError: inv(IPC.logCopyLast),
+  logInfo: inv(IPC.logInfo),
+  bootError: inv(IPC.logBootError),
 };
 
 contextBridge.exposeInMainWorld('nexus', api);

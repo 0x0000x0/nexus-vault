@@ -6,6 +6,7 @@ import { folderColor, useApp } from '../ctx';
 import { GraphIcon } from './icons';
 import { MaxBtn } from './Panes';
 import { NavButtons } from './NavButtons';
+import { LARGE, autoScale, largeLabelDegree, pickInitialCam, shouldShowLabel } from '../graphCam';
 
 type N = NodeObject<GraphNode & { x?: number; y?: number }>;
 interface L {
@@ -40,6 +41,9 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
   const [showGhosts, setShowGhosts] = useState(true);
   const [showOrphans, setShowOrphans] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
+  const [folderFocus, setFolderFocus] = useState<string | null>(null);
+  const folderFitGen = useRef(0);
+  const pendingFolderFit = useRef(0);
   const prevNodes = useRef(new Map<string, N>());
   const fitted = useRef('');
 
@@ -63,6 +67,18 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
   const data = useMemo(() => {
     const keep = new Map<string, N>();
     let nodes = app.graph.nodes.filter((n) => (showGhosts || !n.ghost) && (showOrphans || n.degree > 0));
+    if (folderFocus !== null) {
+      const inFolder = new Set(nodes.filter((n) => !n.ghost && n.folder === folderFocus).map((n) => n.id));
+      // Keep linked ghosts that touch a kept note.
+      const ghostKeep = new Set<string>();
+      for (const l of app.graph.links) {
+        if (inFolder.has(l.source) || inFolder.has(l.target)) {
+          if (l.source.startsWith('ghost:')) ghostKeep.add(l.source);
+          if (l.target.startsWith('ghost:')) ghostKeep.add(l.target);
+        }
+      }
+      nodes = nodes.filter((n) => (n.ghost ? ghostKeep.has(n.id) : n.folder === folderFocus));
+    }
     const ids = new Set(nodes.map((n) => n.id));
     const links: L[] = app.graph.links.filter((l) => ids.has(l.source) && ids.has(l.target)).map((l) => ({ source: l.source, target: l.target }));
     nodes = nodes.map((n) => {
@@ -73,7 +89,7 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
     });
     prevNodes.current = keep;
     return { nodes: nodes as N[], links };
-  }, [app.graph, showGhosts, showOrphans]);
+  }, [app.graph, showGhosts, showOrphans, folderFocus]);
 
   const neighbors = useMemo(() => {
     const m = new Map<string, Set<string>>();
@@ -138,15 +154,33 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
     ? { text: '#dcddde', link: 'rgba(160,160,160,0.28)', linkHl: '#8b6cf6', ghost: '#555', bg: '#1e1e1e' }
     : { text: '#1f1f1f', link: 'rgba(90,90,90,0.25)', linkHl: '#8b6cf6', ghost: '#bdbdbd', bg: '#f7f7f5' };
 
-  // Only the most-linked ~12% get a permanent label; others show on hover / zoom-in.
+  const nCount = data.nodes.length;
+  const scaleAuto = autoScale(nCount);
   const labelDegree = useMemo(() => {
     const d = app.graph.nodes.map((n) => n.degree).sort((a, b) => b - a);
-    return Math.max(4, d[Math.floor(d.length * 0.12)] ?? 4);
+    return largeLabelDegree(d, app.graph.nodes.length);
   }, [app.graph]);
-  // Obsidian-like sizing: ~3px base on screen, growing gently (log) with links, capped at ~2x for hubs.
-  // Radius is computed in screen pixels and only grows slowly when zooming in (scale^0.3).
-  const nodePx = (n: N) => nodeSize * (3 + Math.min(3, 1.1 * Math.log2(1 + (n.degree ?? 0))));
+  // Obsidian-like sizing + autoScale for large vaults (user slider still applies).
+  const nodePx = (n: N) => nodeSize * scaleAuto * (3 + Math.min(3, 1.1 * Math.log2(1 + (n.degree ?? 0))));
   const nodeR = (n: N, scale: number) => (nodePx(n) * Math.pow(scale, 0.3)) / scale;
+
+  const toggleFolder = (f: string | null) => {
+    setFolderFocus((cur) => {
+      const next = cur === f ? null : f;
+      pendingFolderFit.current = ++folderFitGen.current;
+      return next;
+    });
+  };
+  const fitVisible = () => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    if (folderFocus) {
+      const ids = new Set(data.nodes.map((n) => n.id));
+      (fg as unknown as { zoomToFit: (ms: number, pad: number, pred?: (n: N) => boolean) => void }).zoomToFit(400, 40, (n) => ids.has(n.id as string));
+    } else {
+      fg.zoomToFit(400, 30);
+    }
+  };
 
   return (
     <section className="pane" style={{ flex: 1 }} data-pane="graph">
@@ -169,7 +203,7 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
           <button className={`chipbtn${showOrphans ? ' on' : ''}`} onClick={() => setShowOrphans(!showOrphans)} title="Show notes without links">
             Orphans
           </button>
-          <button className="chipbtn" onClick={() => fgRef.current?.zoomToFit(400, 30)} title="Zoom to fit">
+          <button className="chipbtn" onClick={fitVisible} title={folderFocus ? 'Fit visible notes' : 'Fit all notes'}>
             Fit
           </button>
           <button className={`chipbtn${showSettings ? ' on' : ''}`} onClick={() => setShowSettings(!showSettings)} title="Node size and link thickness" data-testid="graph-settings">
@@ -190,6 +224,11 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
               <button className="linkbtn" onClick={() => onSizes({ graphNodeSize: 1, graphLinkWidth: 1 })}>
                 Reset
               </button>
+              {scaleAuto !== 1 && (
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                  Auto size ×{scaleAuto.toFixed(1)} for {nCount} nodes
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -197,20 +236,40 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
           <button onClick={() => zoomBy(1 / 1.3)} title="Zoom out (or scroll)" data-testid="graph-zoom-out">−</button>
           <span data-testid="graph-zoom-pct">{Math.round(zoomK * 100)}%</span>
           <button onClick={() => zoomBy(1.3)} title="Zoom in (or scroll)" data-testid="graph-zoom-in">+</button>
-          <button onClick={() => fgRef.current?.zoomToFit(400, 30)} title="Zoom to fit">⤢</button>
+          <button onClick={fitVisible} title={folderFocus ? 'Fit visible notes' : 'Fit all notes'}>⤢</button>
         </div>
         {folders.length > 0 && (
-          <div className="legend">
+          <div className="legend" onPointerDown={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className={`legendrow${folderFocus === null ? ' on' : ''}`}
+              onClick={() => toggleFolder(null)}
+              title="Show all folders"
+            >
+              <i style={{ background: 'var(--muted)' }} />
+              All folders
+            </button>
             {folders.slice(0, 8).map((f) => (
-              <div key={f}>
+              <button
+                type="button"
+                key={f}
+                className={`legendrow${folderFocus === f ? ' on' : ''}${folderFocus && folderFocus !== f ? ' dim' : ''}`}
+                onClick={() => toggleFolder(f)}
+                title={`Show only notes in ${f}`}
+              >
                 <i style={{ background: folderColor(f, folders) }} />
                 {f}
-              </div>
+              </button>
             ))}
-            <div>
+            <button
+              type="button"
+              className={`legendrow${folderFocus === '' ? ' on' : ''}${folderFocus && folderFocus !== '' ? ' dim' : ''}`}
+              onClick={() => toggleFolder('')}
+              title="Show only root notes"
+            >
               <i style={{ background: folderColor('', folders) }} />
               (root)
-            </div>
+            </button>
           </div>
         )}
         {app.graph.version < 0 || (app.graph.nodes.length === 0 && app.indexVersion <= 0) ? (
@@ -239,11 +298,34 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
           onZoomEnd={reportCam}
           warmupTicks={30}
           onEngineStop={() => {
-            // Fit once per vault, and again when the graph size changes a lot (e.g. index finished late).
+            const fg = fgRef.current;
+            if (!fg || !data.nodes.length) return;
+            // Folder filter change → fit visible set (separate from vault first-cam).
+            if (pendingFolderFit.current) {
+              pendingFolderFit.current = 0;
+              const ids = new Set(data.nodes.map((n) => n.id));
+              (fg as unknown as { zoomToFit: (ms: number, pad: number, pred?: (n: N) => boolean) => void }).zoomToFit(400, 40, (n) => ids.has(n.id as string));
+              return;
+            }
+            // Fit once per vault / size bucket (Back/Forward stamps fitted so we bail).
             const key = `${app.vault.path}:${Math.round(Math.log2(data.nodes.length + 1))}`;
-            if (fitted.current !== key && data.nodes.length) {
-              fitted.current = key;
-              fgRef.current?.zoomToFit(400, 30);
+            if (fitted.current === key) return;
+            fitted.current = key;
+            if (data.nodes.length < LARGE) {
+              fg.zoomToFit(400, 30);
+              return;
+            }
+            if (folderFocus !== null) {
+              const ids = new Set(data.nodes.map((n) => n.id));
+              (fg as unknown as { zoomToFit: (ms: number, pad: number, pred?: (n: N) => boolean) => void }).zoomToFit(400, 40, (n) => ids.has(n.id as string));
+              return;
+            }
+            const cam = pickInitialCam(data.nodes, { selected, folderFocus });
+            if (cam) {
+              fg.centerAt(cam.x, cam.y, 400);
+              fg.zoom(Math.min(12, Math.max(0.05, cam.k)), 400);
+            } else {
+              fg.zoomToFit(400, 30);
             }
           }}
           linkColor={(l) => (hover && (idOf(l.source) === hover || idOf(l.target) === hover) ? colors.linkHl : colors.link)}
@@ -301,11 +383,18 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
               ctx.lineWidth = 1.5 / scale;
               ctx.stroke();
             }
-            const important = id === hover || id === selected || (hl && hl.has(id));
-            // Labels: constant ~11px on screen (independent of node size); non-highlighted labels fade out when zoomed out.
-            const fade = important ? 1 : Math.max(0, Math.min(1, (scale - 0.6) / 0.8));
-            if (showLabels && fade > 0.02 && (important || scale > 1.8 || (n.degree ?? 0) >= labelDegree)) {
-              const fs = 11 / scale;
+            const important = !!(id === hover || id === selected || (hl && hl.has(id)));
+            const show = shouldShowLabel({
+              n: nCount,
+              scale,
+              degree: n.degree ?? 0,
+              labelDegree,
+              important,
+              showLabels,
+            });
+            if (show) {
+              const fade = important ? 1 : nCount >= LARGE ? 1 : Math.max(0, Math.min(1, (scale - 0.6) / 0.8));
+              const fs = (nCount >= LARGE ? 12 : 11) / scale;
               ctx.font = `${important ? 600 : 400} ${fs}px "Segoe UI", system-ui, sans-serif`;
               ctx.textAlign = 'center';
               ctx.textBaseline = 'top';

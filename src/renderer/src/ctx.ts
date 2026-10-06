@@ -10,7 +10,7 @@ export interface AppActions {
   readOnly: boolean;
   fileLinks: [string, string][];
   ask: (title: string, initial?: string, opts?: { okLabel?: string; placeholder?: string; selectBase?: boolean }) => Promise<string | null>;
-  notify: (text: string, err?: boolean) => void;
+  notify: (text: string, err?: boolean, detail?: string, opts?: { skipLog?: boolean }) => void;
   openNote: (rel: string, opts?: { edit?: boolean }) => void;
   select: (rel: string | null) => void;
   showInGraph: (rel: string) => void;

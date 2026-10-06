@@ -7,6 +7,7 @@ import MiniSearch from 'minisearch';
 import type { FsChange, GraphData, GraphNode, IndexStats, LinkRef, NoteInfo, SearchHit } from '../shared/types';
 import { CODE_EXT, extOf, IGNORE_DIRS, parseImports, resolveImport, type RawImport } from './codeparse';
 import { norm, parseNote, resolveTarget } from './parse';
+import { logWarn } from './logger';
 
 const SOURCE_EXT = new Set(['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'py', 'go', 'rs', 'java', 'kt', 'cs', 'rb', 'php', 'c', 'h', 'cpp', 'hpp', 'swift', 'vue', 'svelte', 'md']);
 const MAX_FILES = 20000;
@@ -126,7 +127,7 @@ export class CodeIndex {
       this.timer = setTimeout(() => void this.flush(), 400);
     };
     this.watcher.on('add', q('upsert')).on('change', q('upsert')).on('unlink', q('remove')).on('addDir', q('dir')).on('unlinkDir', q('dir'));
-    this.watcher.on('error', (e) => console.warn('[code watcher]', e));
+    this.watcher.on('error', (e) => logWarn('watch', 'chokidar watcher error (code)', e));
   }
 
   touch(): void {}
