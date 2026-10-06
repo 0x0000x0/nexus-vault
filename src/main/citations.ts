@@ -17,6 +17,8 @@ interface HitLike {
   folder?: string;
   snippet: string;
   score: number;
+  /** Optional 1-based line from vector chunk metadata (preferred over snippet re-search). */
+  startLine?: number;
 }
 
 function escRe(s: string): string {
@@ -58,13 +60,23 @@ export function mergeCitations(
   const add = (h: HitLike, source: Citation['source']) => {
     if (seen.has(h.rel)) return;
     seen.add(h.rel);
-    all.push({ rel: h.rel, path: h.rel, title: h.title, folder: h.folder ?? folderOf(h.rel), snippet: h.snippet, score: h.score, source });
+    all.push({
+      rel: h.rel,
+      path: h.rel,
+      title: h.title,
+      folder: h.folder ?? folderOf(h.rel),
+      snippet: h.snippet,
+      score: h.score,
+      source,
+      ...(typeof h.startLine === 'number' && h.startLine > 0 ? { startLine: h.startLine } : {}),
+    });
   };
   keyword.forEach((h) => add(h, 'keyword'));
   semantic.forEach((h) => add(h, 'semantic'));
   return applyPolicy(all, packs)
     .slice(0, Math.max(1, limit))
     .map(({ rel, ...c }) => {
+      if (typeof c.startLine === 'number' && c.startLine > 0) return c;
       const content = contentOf?.(rel);
       const line = content !== undefined && c.snippet ? lineOf(content, c.snippet) : undefined;
       return line !== undefined ? { ...c, startLine: line } : c;

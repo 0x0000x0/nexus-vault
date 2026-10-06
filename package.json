@@ -1,6 +1,6 @@
 {
   "name": "nexus-vault",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Nexus Vault - Local-first knowledge management",
   "author": "Jesse Lugo",
   "license": "Apache-2.0",
@@ -11,7 +11,8 @@
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
     "test": "vitest run",
     "dist:win": "electron-builder --win nsis portable --x64",
-    "dist:linux": "electron-builder --linux dir"
+    "dist:linux": "electron-builder --linux dir",
+    "vectors:build": "npx --yes tsx scripts/build-vectors.ts"
   },
   "dependencies": {
     "chokidar": "^4.0.3",

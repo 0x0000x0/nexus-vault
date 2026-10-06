@@ -6,3 +6,5 @@ release
 .env
 .ref
 .opencode/
+.nexus-vectors/
+*.f32

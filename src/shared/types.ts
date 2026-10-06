@@ -45,6 +45,10 @@ export interface Settings {
   windowBounds?: WindowBounds;
   layout: LayoutSettings;
   semanticSearch: boolean;
+  /** Ollama model id (local only). Default nomic-embed-text. */
+  embedModel: string;
+  /** Loopback-only Ollama base URL. Default http://127.0.0.1:11434. */
+  embedBaseUrl: string;
   mcp: {
     enabled: boolean;
     port: number;
@@ -151,6 +155,7 @@ export const IPC = {
   setSemantic: 'semantic:set-enabled',
   semanticSearch: 'semantic:search',
   semanticRelated: 'semantic:related',
+  semanticRebuild: 'semantic:rebuild',
   memoryGet: 'memory:get',
   memorySet: 'memory:set',
   snapList: 'snap:list',
@@ -188,10 +193,18 @@ export interface SemanticHit {
   title: string;
   snippet: string;
   score: number;
+  startLine?: number;
 }
 export interface SemanticStatus {
   enabled: boolean;
   indexed: number;
+  chunks?: number;
+  model?: string;
+  ollama?: 'ok' | 'down' | 'unknown';
+  building?: boolean;
+  progress?: { done: number; total: number };
+  needsRebuild?: boolean;
+  indexPath?: string;
 }
 export interface SearchHit {
   rel: string;
