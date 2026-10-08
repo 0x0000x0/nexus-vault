@@ -6,7 +6,7 @@ import { folderColor, useApp } from '../ctx';
 import { GraphIcon } from './icons';
 import { MaxBtn } from './Panes';
 import { NavButtons } from './NavButtons';
-import { LARGE, autoScale, largeLabelDegree, pickInitialCam, shouldShowLabel } from '../graphCam';
+import { LARGE, autoScale, forceBudget, inBox, largeLabelDegree, pickInitialCam, refreshBudget, segInBox, shouldShowLabel, viewBoxFromTransform, type Box } from '../graphCam';
 
 type N = NodeObject<GraphNode & { x?: number; y?: number }>;
 interface L {
@@ -27,17 +27,31 @@ interface Props {
   onCam?: (cam: { x: number; y: number; k: number }) => void;
   /** Back/Forward restore request: jump to this camera once. */
   restoreCam?: { cam: { x: number; y: number; k: number }; n: number } | null;
+  /** 0.0.8 collapsed-graph controls: mode/expand requests bubble to App (which owns getGraph opts). */
+  onGraphOpts?: (o: { mode: 'auto' | 'full'; expand: string | null }) => void;
 }
 
 const idOf = (v: string | N) => (typeof v === 'string' ? v : (v.id as string));
 
-export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWidth, onSizes, onCam, restoreCam }: Props) {
+export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWidth, onSizes, onCam, restoreCam, onGraphOpts }: Props) {
   const [showSettings, setShowSettings] = useState(false);
   const app = useApp();
   const wrapRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods<N, L>>();
   const [size, setSize] = useState({ w: 400, h: 300 });
   const [hover, setHover] = useState<string | null>(null);
+  // 0.0.8 perf: canvas paint callbacks read this ref so hover repaints don't wait on React.
+  const hoverRef = useRef<string | null>(null);
+  // Last computed view box (graph coords, padded) for viewport culling.
+  const viewBoxRef = useRef<Box | null>(null);
+  // True while the force engine is still settling (labels are gated on large graphs).
+  const engineRunning = useRef(true);
+  // Collapsed-graph controls (0.0.8): 'auto' collapses large vaults, 'full' shows every note.
+  const [graphMode, setGraphMode] = useState<'auto' | 'full'>('auto');
+  const modeRef = useRef(graphMode);
+  modeRef.current = graphMode;
+  const lastDirClick = useRef<{ id: string; t: number } | null>(null);
+  useEffect(() => setGraphMode('auto'), [app.vault.path]);
   const [showGhosts, setShowGhosts] = useState(true);
   const [showOrphans, setShowOrphans] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
@@ -58,6 +72,7 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
 
   // Folder order for colors: by note count, desc.
   const folders = useMemo(() => {
+    if (app.graph.folders) return app.graph.folders;
     const c = new Map<string, number>();
     for (const n of app.graph.nodes) if (!n.ghost && n.folder) c.set(n.folder, (c.get(n.folder) ?? 0) + 1);
     return [...c.entries()].sort((a, b) => b[1] - a[1]).map(([f]) => f);
@@ -104,12 +119,27 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
     return m;
   }, [data]);
 
+  // 0.0.8 perf: simulation budget scaled by node count. Index refreshes that keep
+  // >=90% of node positions skip warmup so editing a note doesn't re-run the layout.
+  const budget = useMemo(() => {
+    const n = data.nodes.length;
+    let positioned = 0;
+    for (const x of data.nodes) if (x.x !== undefined && x.y !== undefined) positioned++;
+    if (n > 0 && positioned / n >= 0.9) return refreshBudget(n, positioned);
+    return forceBudget(n);
+  }, [data]);
+
   useEffect(() => {
     const fg = fgRef.current;
     if (!fg) return;
-    fg.d3Force('charge')?.strength(-60);
+    fg.d3Force('charge')?.strength(budget.charge);
     fg.d3Force('link')?.distance(40);
-  }, []);
+  }, [budget]);
+
+  // Re-arm the running flag whenever the dataset changes; cleared in onEngineStop.
+  useEffect(() => {
+    engineRunning.current = true;
+  }, [data]);
 
   // External focus requests ("Show in graph").
   useEffect(() => {
@@ -143,13 +173,38 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
   };
 
   const [zoomK, setZoomK] = useState(1);
+  const zoomPctRef = useRef<HTMLSpanElement>(null);
+  const lastZoomTick = useRef(0);
+  // 0.0.8 perf: don't re-render on every wheel tick — paint the % straight into the
+  // DOM and throttle the state sync (other UI reading zoomK stays roughly current).
+  const handleZoom = (t: { k: number }) => {
+    if (zoomPctRef.current) zoomPctRef.current.textContent = `${Math.round(t.k * 100)}%`;
+    const now = Date.now();
+    if (now - lastZoomTick.current >= 100) {
+      lastZoomTick.current = now;
+      setZoomK(t.k);
+    }
+  };
   const zoomBy = (f: number) => {
     const fg = fgRef.current;
     if (!fg) return;
     fg.zoom(Math.min(12, Math.max(0.05, fg.zoom() * f)), 250);
   };
 
-  const hl = hover ? neighbors.get(hover) ?? new Set<string>() : null;
+  // 0.0.8 perf: hover id lives in a ref for canvas paint callbacks; React state only
+  // updates when the id actually changes (panel), while fg.refresh() repaints at once.
+  const handleHover = (n: N | null | undefined) => {
+    const id = n ? (n.id as string) : null;
+    if (hoverRef.current !== id) {
+      hoverRef.current = id;
+      setHover((prev) => (prev === id ? prev : id));
+      // Repaint at once without waiting on React (best-effort: absent on some
+      // force-graph versions, in which case the setHover render repaints anyway).
+      (fgRef.current as unknown as { refresh?: () => void })?.refresh?.();
+    }
+    if (wrapRef.current) wrapRef.current.style.cursor = id ? 'pointer' : 'grab';
+  };
+
   const colors = dark
     ? { text: '#dcddde', link: 'rgba(160,160,160,0.28)', linkHl: '#8b6cf6', ghost: '#555', bg: '#1e1e1e' }
     : { text: '#1f1f1f', link: 'rgba(90,90,90,0.25)', linkHl: '#8b6cf6', ghost: '#bdbdbd', bg: '#f7f7f5' };
@@ -171,6 +226,20 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
       return next;
     });
   };
+  // 0.0.8 collapsed-graph controls.
+  const collapsed = app.graph.collapsed;
+  const headCount = collapsed ? app.graph.nodes.filter((n) => n.id.startsWith('dir:')).length : app.graph.nodes.filter((n) => !n.ghost).length;
+  const headKind = collapsed
+    ? `folders (collapsed) · ${collapsed.total} notes`
+    : app.readOnly
+      ? (app.graph.nodes.some((n) => n.id.startsWith('dir:')) ? 'folders (collapsed)' : 'files')
+      : 'notes';
+  const toggleMode = () => {
+    const next = modeRef.current === 'auto' ? 'full' : 'auto';
+    setGraphMode(next);
+    onGraphOpts?.({ mode: next, expand: collapsed?.expanded ?? null });
+  };
+  const clearExpand = () => onGraphOpts?.({ mode: modeRef.current, expand: null });
   const fitVisible = () => {
     const fg = fgRef.current;
     if (!fg) return;
@@ -187,8 +256,20 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
       <div className="panehead">
         <NavButtons pane="graph" />
         <GraphIcon size={13} />
-        <b>Graph</b> <span className="hcount">{app.graph.nodes.filter((n) => !n.ghost).length} {app.readOnly ? (app.graph.nodes.some((n) => n.id.startsWith('dir:')) ? 'folders (collapsed)' : 'files') : 'notes'} · {app.graph.links.length} {app.readOnly ? 'imports' : 'links'}</span>
+        <b>Graph</b> <span className="hcount">{headCount} {headKind} · {app.graph.links.length} {app.readOnly ? 'imports' : 'links'}</span>
         <div className="r">
+          {(collapsed || graphMode === 'full') && !app.readOnly && (
+            <>
+              <button className={`chipbtn${graphMode === 'full' ? ' on' : ''}`} onClick={toggleMode} title={graphMode === 'full' ? 'Back to folder-collapsed view' : 'Show every note (slow on large vaults)'} data-testid="graph-all-notes">
+                All notes (slow)
+              </button>
+              {collapsed?.expanded && (
+                <button className="chipbtn" onClick={clearExpand} title={`Collapse ${collapsed?.expanded} back to its folder`}>
+                  Collapse
+                </button>
+              )}
+            </>
+          )}
           <MaxBtn single={view === 'graph'} onMax={onMax} />
         </div>
       </div>
@@ -234,7 +315,7 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
         </div>
         <div className="zoombar" onPointerDown={(e) => e.stopPropagation()} data-testid="graph-zoombar">
           <button onClick={() => zoomBy(1 / 1.3)} title="Zoom out (or scroll)" data-testid="graph-zoom-out">−</button>
-          <span data-testid="graph-zoom-pct">{Math.round(zoomK * 100)}%</span>
+          <span ref={zoomPctRef} data-testid="graph-zoom-pct">{Math.round(zoomK * 100)}%</span>
           <button onClick={() => zoomBy(1.3)} title="Zoom in (or scroll)" data-testid="graph-zoom-in">+</button>
           <button onClick={fitVisible} title={folderFocus ? 'Fit visible notes' : 'Fit all notes'}>⤢</button>
         </div>
@@ -291,13 +372,20 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
           nodeId="id"
           backgroundColor={colors.bg}
           nodeRelSize={4}
-          cooldownTicks={200}
+          d3AlphaDecay={budget.alphaDecay}
+          cooldownTicks={budget.cooldownTicks}
           minZoom={0.05}
           maxZoom={12}
-          onZoom={(t) => setZoomK(t.k)}
+          onZoom={handleZoom}
+          onRenderFramePre={(ctx) => {
+            // 0.0.8 perf: visible graph-space box for culling, from this frame's canvas transform.
+            const gt = ctx.getTransform();
+            viewBoxRef.current = viewBoxFromTransform({ a: gt.a, e: gt.e, f: gt.f }, ctx.canvas.width, ctx.canvas.height, 80);
+          }}
           onZoomEnd={reportCam}
-          warmupTicks={30}
+          warmupTicks={budget.warmupTicks}
           onEngineStop={() => {
+            engineRunning.current = false;
             const fg = fgRef.current;
             if (!fg || !data.nodes.length) return;
             // Folder filter change → fit visible set (separate from vault first-cam).
@@ -328,14 +416,31 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
               fg.zoomToFit(400, 30);
             }
           }}
-          linkColor={(l) => (hover && (idOf(l.source) === hover || idOf(l.target) === hover) ? colors.linkHl : colors.link)}
-          linkWidth={(l) => linkWidth * (hover && (idOf(l.source) === hover || idOf(l.target) === hover) ? 1.6 : 0.6)}
-          linkDirectionalArrowLength={(l) => (hover && (idOf(l.source) === hover || idOf(l.target) === hover) ? 2.5 : 0)}
-          linkDirectionalArrowRelPos={0.92}
-          onNodeHover={(n) => {
-            setHover(n ? (n.id as string) : null);
-            if (wrapRef.current) wrapRef.current.style.cursor = n ? 'pointer' : 'grab';
+          linkColor={(l) => {
+            const hov = hoverRef.current;
+            return hov && (idOf(l.source) === hov || idOf(l.target) === hov) ? colors.linkHl : colors.link;
           }}
+          linkWidth={(l) => {
+            const hov = hoverRef.current;
+            return linkWidth * (hov && (idOf(l.source) === hov || idOf(l.target) === hov) ? 1.6 : 0.6);
+          }}
+          linkDirectionalArrowLength={(l) => {
+            const hov = hoverRef.current;
+            return hov && (idOf(l.source) === hov || idOf(l.target) === hov) ? 2.5 : 0;
+          }}
+          linkDirectionalArrowRelPos={0.92}
+          linkVisibility={(l) => {
+            const b = viewBoxRef.current;
+            const a = typeof l.source === 'string' ? undefined : (l.source as N);
+            const c = typeof l.target === 'string' ? undefined : (l.target as N);
+            return segInBox(b, a?.x, a?.y, c?.x, c?.y);
+          }}
+          nodeVisibility={(n) => {
+            const id = n.id as string;
+            if (id === selected || id === hoverRef.current) return true;
+            return inBox(viewBoxRef.current, n.x, n.y);
+          }}
+          onNodeHover={handleHover}
           onNodeClick={(n) => {
             const id = n.id as string;
             if (n.ghost) {
@@ -345,6 +450,13 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
             if (id.startsWith('dir:')) {
               const d = id.slice(4);
               app.openOnBoard(d === '(root)' ? '' : d, 'folder');
+              // Second click within 350ms on the same dir expands it into its notes.
+              const now = Date.now();
+              const last = lastDirClick.current;
+              lastDirClick.current = { id, t: now };
+              if (last && last.id === id && now - last.t < 350) {
+                onGraphOpts?.({ mode: modeRef.current, expand: d });
+              }
               return;
             }
             app.select(id);
@@ -361,8 +473,13 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
           }}
           nodeCanvasObject={(n, ctx, scale) => {
             const id = n.id as string;
+            const hov = hoverRef.current;
             const r = nodeR(n, scale);
-            const dim = hl && id !== hover && !hl.has(id);
+            // Viewport cull (box computed once per frame in onRenderFramePre); never cull selected/hover.
+            const box = viewBoxRef.current;
+            if (id !== selected && id !== hov && !inBox(box, n.x, n.y, r)) return;
+            const nb = hov ? neighbors.get(hov) : undefined;
+            const dim = !!nb && id !== hov && !nb.has(id);
             const color = n.ghost ? colors.ghost : folderColor(n.folder, folders);
             ctx.globalAlpha = dim ? 0.15 : 1;
             ctx.beginPath();
@@ -376,14 +493,20 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
               ctx.stroke();
               ctx.globalAlpha = dim ? 0.15 : 1;
             }
-            if (id === selected || id === hover) {
+            if (id === selected || id === hov) {
               ctx.beginPath();
               ctx.arc(n.x!, n.y!, r + 2.5 / scale, 0, 2 * Math.PI);
               ctx.strokeStyle = '#8b6cf6';
               ctx.lineWidth = 1.5 / scale;
               ctx.stroke();
             }
-            const important = !!(id === hover || id === selected || (hl && hl.has(id)));
+            const important = !!(id === hov || id === selected || (nb && nb.has(id)));
+            // While the engine is still running on a large graph, only important
+            // nodes (or zoomed-in views) pay for fillText.
+            if (nCount >= LARGE && engineRunning.current && !important && scale < 2) {
+              ctx.globalAlpha = 1;
+              return;
+            }
             const show = shouldShowLabel({
               n: nCount,
               scale,
@@ -405,6 +528,8 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
             ctx.globalAlpha = 1;
           }}
           nodePointerAreaPaint={(n, color, ctx, scale) => {
+            const id = n.id as string;
+            if (id !== selected && id !== hoverRef.current && !inBox(viewBoxRef.current, n.x, n.y, nodeR(n, scale))) return;
             ctx.fillStyle = color;
             ctx.beginPath();
             ctx.arc(n.x!, n.y!, nodeR(n, scale) + 3 / scale, 0, 2 * Math.PI);

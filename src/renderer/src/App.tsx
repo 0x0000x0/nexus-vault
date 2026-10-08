@@ -56,6 +56,22 @@ export function App() {
   const [prog, setProg] = useState<ProgressInfo | null>(null);
   const [files, setFiles] = useState<Set<string>>(new Set());
   const [fileLinks, setFileLinks] = useState<[string, string][]>([]);
+  // 0.0.8 perf: collapsed-graph request opts (mode/expand). Ref so event handlers
+  // always read the latest; state so resets re-render. Reset when vault changes.
+  const [graphOpts, setGraphOptsState] = useState<{ mode: 'auto' | 'full'; expand: string | null }>({ mode: 'auto', expand: null });
+  const graphOptsRef = useRef(graphOpts);
+  /** Deferred fileLinks fetch: only needed while the Board pane is mounted. */
+  const loadLinks = useCallback(() => {
+    void nexus.fileLinks().then(setFileLinks);
+  }, []);
+  const handleGraphOpts = useCallback(
+    (o: { mode: 'auto' | 'full'; expand: string | null }) => {
+      graphOptsRef.current = o;
+      setGraphOptsState(o);
+      void nexus.getGraph(o).then(setGraph);
+    },
+    [],
+  );
   const mainRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef(0);
   const bannerTimer = useRef<number | null>(null);
@@ -122,9 +138,16 @@ export function App() {
     const offTheme = nexus.onSystemTheme(() => setSystemDark(darkQuery.matches));
     const offIndex = nexus.onIndexChanged((s) => {
       setStats(s);
-      void nexus.getGraph().then(setGraph);
-      void nexus.listNotes().then((r) => setFiles(new Set(r.notes.map((n) => n.rel))));
-      void nexus.fileLinks().then(setFileLinks);
+      // 0.0.8 perf: graph paints first, then notes, then fileLinks last (sequential,
+      // not Promise.all). fileLinks is deferred until the Board pane needs it.
+      const opts = graphOptsRef.current;
+      void nexus
+        .getGraph(opts)
+        .then((g) => {
+          setGraph(g);
+          return nexus.listNotes();
+        })
+        .then((r) => setFiles(new Set(r.notes.map((n) => n.rel))));
     });
     const offProg = nexus.onProgress((p) => setProg(p.label ? p : null));
     const mq = () => setSystemDark(darkQuery.matches);
@@ -144,6 +167,8 @@ export function App() {
     setStats(null);
     setOpenRel(null);
     setBoardFolder('');
+    graphOptsRef.current = { mode: 'auto', expand: null };
+    setGraphOptsState({ mode: 'auto', expand: null });
     navRef.current = createNav();
     boardCams.current.clear();
     graphCam.current = { x: 0, y: 0, k: 0 };
@@ -158,11 +183,23 @@ export function App() {
       if (r.ready) {
         setStats(r.stats);
         setFiles(new Set(r.notes.map((n) => n.rel)));
-        void nexus.fileLinks().then(setFileLinks);
-        void nexus.getGraph().then(setGraph);
+        // 0.0.8 perf: graph first so it paints early, fileLinks last (deferred).
+        void nexus.getGraph(graphOptsRef.current).then(setGraph);
       }
     });
   }, [vault?.path]);
+
+  // 0.0.8 perf: fileLinks (all note->note edges) is only needed by the Board pane. Fetch it after the
+  // graph for this index version has landed, and only while the Board is visible; switching to the
+  // Board later fetches it then.
+  const linksFor = useRef('');
+  useEffect(() => {
+    if (!vault || graph.version < 0 || layout.view === 'graph') return;
+    const key = `${vault.path}:${graph.version}`;
+    if (linksFor.current === key) return;
+    linksFor.current = key;
+    loadLinks();
+  }, [vault, graph.version, layout.view, loadLinks]);
 
   // ---- theme
   const resolved = theme === 'system' ? (systemDark ? 'dark' : 'light') : theme;
@@ -443,7 +480,7 @@ export function App() {
       restoreView={boardRestore}
     />
   );
-  const graphPane = <GraphPane view={layout.view} onMax={maxToggle('graph')} dark={resolved === 'dark'} selected={selected} focus={graphFocus} nodeSize={layout.graphNodeSize} linkWidth={layout.graphLinkWidth} onSizes={(p, persist) => setLayout(p, persist)} onCam={onGraphCam} restoreCam={graphRestore} />;
+  const graphPane = <GraphPane view={layout.view} onMax={maxToggle('graph')} dark={resolved === 'dark'} selected={selected} focus={graphFocus} nodeSize={layout.graphNodeSize} linkWidth={layout.graphLinkWidth} onSizes={(p, persist) => setLayout(p, persist)} onCam={onGraphCam} restoreCam={graphRestore} onGraphOpts={handleGraphOpts} />;
   const [left, right] = layout.paneOrder === 'board-graph' ? [board, graphPane] : [graphPane, board];
 
   const mainWidth = () => mainRef.current?.clientWidth ?? 1000;

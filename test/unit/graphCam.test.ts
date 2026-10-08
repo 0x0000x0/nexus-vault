@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LARGE, autoScale, largeLabelDegree, pickInitialCam, shouldShowLabel } from '../../src/renderer/src/graphCam';
+import { LARGE, autoScale, forceBudget, largeLabelDegree, pickInitialCam, refreshBudget, shouldShowLabel } from '../../src/renderer/src/graphCam';
 
 describe('graphCam', () => {
   it('autoScale steps', () => {
@@ -32,5 +32,15 @@ describe('graphCam', () => {
     expect(shouldShowLabel({ n: LARGE, scale: 1.5, degree: 100, labelDegree: 10, important: false, showLabels: true })).toBe(true);
     expect(shouldShowLabel({ n: 10, scale: 2, degree: 1, labelDegree: 4, important: false, showLabels: true })).toBe(true);
     expect(shouldShowLabel({ n: 10, scale: 1, degree: 1, labelDegree: 4, important: true, showLabels: true })).toBe(true);
+  });
+
+  it('forceBudget scales ticks down and weakens charge for big graphs', () => {
+    expect(forceBudget(0)).toMatchObject({ warmupTicks: 30, cooldownTicks: 200, charge: -60 });
+    expect(forceBudget(400)).toMatchObject({ warmupTicks: 20, cooldownTicks: 80 });
+    expect(forceBudget(1200)).toMatchObject({ warmupTicks: 10, cooldownTicks: 40, charge: -30 });
+  });
+
+  it('refreshBudget skips warmup when positions are mostly kept', () => {
+    expect(refreshBudget(1000, 950).warmupTicks).toBe(0);
   });
 });
