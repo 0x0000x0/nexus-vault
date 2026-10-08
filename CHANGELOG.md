@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.0.8
+
+Speed release for big vaults (~2,500+ notes) and big folders. Plan: `PERF-PLAN.md`.
+
+### Changed
+- **Collapse by default for large note vaults** — over 800 notes, Graph shows folder groups plus hub notes (like code mode above 1,200 files). Double-click a folder dot to expand it; **Collapse** to fold back; **All notes (slow)** for the full graph
+- **Faster graph settle** — force ticks, alpha decay and charge scale with node count; index refreshes reuse existing positions instead of re-running the layout
+- **Cheaper drawing** — off-screen nodes, links and hit-areas are skipped; labels on large graphs wait until the layout settles (except hovered/selected/neighbors)
+- **Less React work** — zoom % and hover no longer re-render the Graph pane on every event
+- **IPC cache** — `getGraph` is cached per index version; board links (`fileLinks`) load after the graph and only while the Board is visible
+- **Board** — `freeSlot` uses an occupancy grid (was O(n²)); auto-populate adds at most 150 note cards per folder with **Show more…**
+
+### Tests
+- Unit tests for collapsed note graph, force budget table, and freeSlot (500 placements)
+
 ## 0.0.7
 
 ### Added

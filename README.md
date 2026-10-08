@@ -4,7 +4,7 @@
 
 Built with Electron, TypeScript, and React. Opens folders of plain Markdown notes (including vaults you already keep as `.md` files). Primary target is Windows; Linux builds work for development.
 
-> Status: early (0.0.7). Portable Windows zip is on the [GitHub Releases](https://github.com/0x0000x0/nexus-vault/releases) page (unsigned — see Windows note below). Or build from source.
+> Status: early (0.0.8). Portable Windows zip is on the [GitHub Releases](https://github.com/0x0000x0/nexus-vault/releases) page (unsigned — see Windows note below). Or build from source.
 
 ![Nexus Vault — folder tree, live graph, and note panel](screenshots/graph.png)
 
@@ -19,6 +19,9 @@ Built with Electron, TypeScript, and React. Opens folders of plain Markdown note
 ## Windows note
 
 Windows may block the unsigned installer or `.exe` (Smart App Control or SmartScreen), the same way it can with other new apps. Builds are not code-signed yet. If Windows blocks it, turn Smart App Control off (or choose Run / Allow when prompted) so you can install and try the app.
+
+## What's new in 0.0.8
+- **Big vaults open faster** — vaults over 800 notes start with a folder-collapsed graph (one dot per folder plus its most-linked notes). Double-click a folder dot to expand it, or use **All notes (slow)** to see everything. The graph settles in far fewer steps, skips drawing off-screen dots, and keeps zoom/hover off the slow path. Board adds at most 150 note cards per folder (**Show more…** for the rest).
 
 ## What's new in 0.0.7
 - **Code architecture board** — after opening a repo, Board shows nested system / app / component boxes (IcePanel-style) inferred from folders + imports (Electron / monorepo / web / generic). Toggle **Architecture | Folders**; zoom into a group; Reset layout. Honest **Inferred** badge — not a perfect C4 model. Strongest for JS/TS; other languages get folder boxes. Layout stays in app data; repo stays read-only. Graph is unchanged (file/import force layout).
