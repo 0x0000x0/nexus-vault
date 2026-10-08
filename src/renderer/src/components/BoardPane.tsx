@@ -181,7 +181,7 @@ export function BoardPane(p: Props) {
   const noteSet = app.files;
   // Only prune/populate once the file list for this index is in (avoids wiping cards during a refresh race).
   const graphReady = app.graph.version >= 0 && (app.files.size > 0 || app.graph.nodes.length === 0);
-  // 0.0.8 perf: cap newly added note cards per run (folders are still all added).
+  // 0.0.8 perf: auto-populate at most noteCap note cards per folder (folders are still all added).
   const [noteCap, setNoteCap] = useState(150);
   const [showMoreCount, setShowMoreCount] = useState(0);
   useEffect(() => {
@@ -215,9 +215,12 @@ export function BoardPane(p: Props) {
     const noteCandidates = entries.list.filter(
       (e) => e.kind === 'file' && (e.ext === 'md' || p.readOnly) && !have.has(e.relPath) && !hidden.has(e.relPath) && noteSet.has(e.relPath),
     );
+    // Cap is per folder (total note cards of this folder on the board), not per effect run.
+    const onBoard = nodes.filter((n) => n.type === 'note' && n.file && dirOf(n.file) === folder).length;
+    const allowance = Math.max(0, noteCap - onBoard);
     let added = 0;
     for (const e of noteCandidates) {
-      if (added >= noteCap) break;
+      if (added >= allowance) break;
       add(e, 'note');
       added++;
     }
