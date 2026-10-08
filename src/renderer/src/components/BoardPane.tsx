@@ -181,6 +181,13 @@ export function BoardPane(p: Props) {
   const noteSet = app.files;
   // Only prune/populate once the file list for this index is in (avoids wiping cards during a refresh race).
   const graphReady = app.graph.version >= 0 && (app.files.size > 0 || app.graph.nodes.length === 0);
+  // 0.0.8 perf: cap newly added note cards per run (folders are still all added).
+  const [noteCap, setNoteCap] = useState(150);
+  const [showMoreCount, setShowMoreCount] = useState(0);
+  useEffect(() => {
+    setNoteCap(150);
+    setShowMoreCount(0);
+  }, [folder]);
 
   // ---------- auto-populate: notes + subfolders of the current folder ----------
   useEffect(() => {
@@ -204,13 +211,23 @@ export function BoardPane(p: Props) {
       changed = true;
     };
     for (const e of entries.list) if (e.kind === 'folder' && !have.has(e.relPath) && !hidden.has(e.relPath)) add(e, 'folder');
-    for (const e of entries.list) if (e.kind === 'file' && (e.ext === 'md' || p.readOnly) && !have.has(e.relPath) && !hidden.has(e.relPath) && noteSet.has(e.relPath)) add(e, 'note');
+    // 0.0.8 perf: cap note cards per run; leftovers surface via the "Show more…" chip.
+    const noteCandidates = entries.list.filter(
+      (e) => e.kind === 'file' && (e.ext === 'md' || p.readOnly) && !have.has(e.relPath) && !hidden.has(e.relPath) && noteSet.has(e.relPath),
+    );
+    let added = 0;
+    for (const e of noteCandidates) {
+      if (added >= noteCap) break;
+      add(e, 'note');
+      added++;
+    }
+    setShowMoreCount(Math.max(0, noteCandidates.length - added));
     if (changed) {
       const ids = new Set(nodes.map((n) => n.id));
       update((bb) => ({ ...bb, nodes, edges: bb.edges.filter((ed) => ids.has(ed.from) && ids.has(ed.to)), view: bb.view ?? undefined }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file === null, entries, folder, noteSet, graphReady]);
+  }, [file === null, entries, folder, noteSet, graphReady, noteCap]);
 
   // ---------- data for cards ----------
   const noteRels = useMemo(() => board.nodes.filter((n) => n.type === 'note' && n.file).map((n) => n.file!), [board.nodes]);
@@ -1098,6 +1115,11 @@ export function BoardPane(p: Props) {
                 Reset layout
               </button>
             </>
+          )}
+          {!isArch && showMoreCount > 0 && (
+            <button className="chipbtn" onClick={() => setNoteCap((c) => c + 150)} title={`Add ${Math.min(150, showMoreCount)} more note cards`}>
+              Show more… ({showMoreCount})
+            </button>
           )}
           {!isArch && folder && (
             <button className="chipbtn" onClick={() => p.setFolder(dirOf(folder))} title="Up one level">

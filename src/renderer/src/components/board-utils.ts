@@ -25,10 +25,44 @@ export function overlaps(a: { x: number; y: number; w: number; h: number }, b: {
 
 /** First free cell in the grid (row-major) that does not overlap existing nodes. */
 export function freeSlot(nodes: BoardNode[], w: number, h: number, cols: number = GRID.cols): { x: number; y: number } {
+  // Build an occupancy Set of cell keys "r,c" once from existing non-group nodes,
+  // then scan candidate cells against the Set in O(1) per candidate.
+  const cellKeysFor = (x: number, y: number, ww: number, hh: number): string[] => {
+    const c0 = Math.floor((x - GRID.x0) / GRID.dx);
+    const c1 = Math.floor((x + ww - GRID.x0) / GRID.dx);
+    const r0 = Math.floor((y - GRID.y0) / GRID.dy);
+    const r1 = Math.floor((y + hh - GRID.y0) / GRID.dy);
+    const keys: string[] = [];
+    for (let r = r0; r <= r1; r++) {
+      if (r < 0) continue;
+      for (let c = c0; c <= c1; c++) keys.push(r + ',' + c);
+    }
+    return keys;
+  };
+  const occupied = new Set<string>();
+  for (const n of nodes) {
+    if (n.type === 'group') continue;
+    // A node occupies a cell when overlaps() is true for that cell's rect.
+    // Check the cells its bbox touches (plus neighbors for the margin).
+    const c0 = Math.floor((n.x - GRID.x0) / GRID.dx) - 1;
+    const c1 = Math.floor((n.x + n.w - GRID.x0) / GRID.dx) + 1;
+    const r0 = Math.floor((n.y - GRID.y0) / GRID.dy) - 1;
+    const r1 = Math.floor((n.y + n.h - GRID.y0) / GRID.dy) + 1;
+    for (let r = Math.max(0, r0); r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const cell = { x: GRID.x0 + c * GRID.dx, y: GRID.y0 + r * GRID.dy, w, h };
+        if (overlaps(cell, n)) occupied.add(r + ',' + c);
+      }
+    }
+    // Always mark the cells the node's own rect touches so odd sizes still block.
+    for (const k of cellKeysFor(n.x, n.y, n.w, n.h)) occupied.add(k);
+  }
   for (let r = 0; r < 2000; r++) {
     for (let c = 0; c < cols; c++) {
-      const cand = { x: GRID.x0 + c * GRID.dx, y: GRID.y0 + r * GRID.dy, w, h };
-      if (!nodes.some((n) => n.type !== 'group' && overlaps(cand, n))) return cand;
+      if (!occupied.has(r + ',' + c)) {
+        const cand = { x: GRID.x0 + c * GRID.dx, y: GRID.y0 + r * GRID.dy, w, h };
+        return cand;
+      }
     }
   }
   return { x: GRID.x0, y: GRID.y0 };
