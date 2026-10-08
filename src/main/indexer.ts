@@ -4,7 +4,8 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { watch, type FSWatcher } from 'chokidar';
 import MiniSearch from 'minisearch';
-import type { FsChange, GraphData, GraphNode, IndexStats, LinkRef, NoteInfo, SearchHit } from '../shared/types';
+import type { FsChange, GraphData, GraphOpts, IndexStats, LinkRef, NoteInfo, SearchHit } from '../shared/types';
+import { COLLAPSE_ABOVE_NOTES, collapsedNoteGraph, fullNoteGraph } from './notegraph';
 import { norm, parseNote, resolveTarget, titleOf, type ParsedNote } from './parse';
 import { logWarn } from './logger';
 
@@ -17,7 +18,6 @@ interface NoteRec {
 
 const toRel = (root: string, abs: string) => path.relative(root, abs).split(path.sep).join('/');
 const dirOf = (rel: string) => (rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '');
-const topFolder = (rel: string) => (rel.includes('/') ? rel.slice(0, rel.indexOf('/')) : '');
 
 export class VaultIndex {
   readonly root: string;
@@ -158,9 +158,14 @@ export class VaultIndex {
     this.onChange(this.stats(), fsChange);
   }
 
-  /** All resolved file->file links (never collapsed). */
-  links(): [string, string][] {
+  /** Resolved file->file links (never collapsed). With `among`, only links whose both ends are in that set. */
+  links(among?: string[]): [string, string][] {
     const out: [string, string][] = [];
+    if (among) {
+      const set = new Set(among);
+      for (const s of set) for (const t of this.out.get(s)?.keys() ?? []) if (set.has(t)) out.push([s, t]);
+      return out;
+    }
     for (const [s, m] of this.out) for (const t of m.keys()) out.push([s, t]);
     return out;
   }
@@ -222,28 +227,27 @@ export class VaultIndex {
     return this.notes.has(rel);
   }
 
-  graph(): GraphData {
-    const nodes = new Map<string, GraphNode>();
-    const links: { source: string; target: string }[] = [];
-    for (const n of this.notes.values()) nodes.set(n.rel, { id: n.rel, title: n.title, folder: topFolder(n.rel), degree: 0, tags: n.parsed.tags });
-    for (const [src, set] of this.out) {
-      for (const t of set) {
-        links.push({ source: src, target: t });
-        nodes.get(src)!.degree++;
-        const tn = nodes.get(t);
-        if (tn) tn.degree++;
-      }
+  private graphCache = new Map<string, GraphData>();
+  private graphCacheVersion = -1;
+
+  /**
+   * Graph for the renderer. Large vaults (> COLLAPSE_ABOVE_NOTES) are folder-collapsed unless
+   * opts.mode === 'full'; opts.expand opens one folder group. Cached per index version (0.0.8).
+   */
+  graph(opts: GraphOpts = {}): GraphData {
+    if (this.graphCacheVersion !== this.version) {
+      this.graphCache.clear();
+      this.graphCacheVersion = this.version;
     }
-    for (const [src, gh] of this.ghosts) {
-      for (const g of gh) {
-        const id = `ghost:${norm(g)}`;
-        if (!nodes.has(id)) nodes.set(id, { id, title: g, folder: '', ghost: true, degree: 0, tags: [] });
-        nodes.get(id)!.degree++;
-        nodes.get(src)!.degree++;
-        links.push({ source: src, target: id });
-      }
-    }
-    return { nodes: [...nodes.values()], links, version: this.version };
+    const collapse = opts.mode !== 'full' && this.notes.size > COLLAPSE_ABOVE_NOTES;
+    const key = collapse ? `c:${opts.expand ?? ''}` : 'full';
+    const hit = this.graphCache.get(key);
+    if (hit) return hit;
+    const notes = [...this.notes.values()].map((n) => ({ rel: n.rel, title: n.title, tags: n.parsed.tags }));
+    const g = collapse ? collapsedNoteGraph(notes, this.out, this.ghosts, this.version, norm, opts.expand ?? null) : fullNoteGraph(notes, this.out, this.ghosts, this.version, norm);
+    if (this.graphCache.size >= 6) this.graphCache.delete(this.graphCache.keys().next().value as string);
+    this.graphCache.set(key, g);
+    return g;
   }
 
   search(q: string, limit = 30): SearchHit[] {

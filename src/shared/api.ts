@@ -1,6 +1,6 @@
 // Type of the window.nexus bridge (implemented in src/preload/index.ts). Grok Bot.
 import type { ArchModel } from './arch';
-import type { BoardFile, DirEntry, FsChange, ProgressInfo, GraphData, IndexStats, LayoutSettings, NoteCount, NoteFile, NoteInfo, RecentVaultView, SearchHit, Settings, ThemePref, VaultInfo, MemoryPacks, MemoryPolicy, SnapshotInfo } from './types';
+import type { BoardFile, DirEntry, FsChange, ProgressInfo, GraphData, GraphOpts, IndexStats, LayoutSettings, NoteCount, NoteFile, NoteInfo, RecentVaultView, SearchHit, Settings, ThemePref, VaultInfo, MemoryPacks, MemoryPolicy, SnapshotInfo } from './types';
 
 export interface NexusApi {
   getSettings(): Promise<Settings>;
@@ -26,10 +26,11 @@ export interface NexusApi {
   revealPath(rel: string): Promise<void>;
   copyPath(rel: string): Promise<string>;
   // index
-  getGraph(): Promise<GraphData>;
+  getGraph(opts?: GraphOpts): Promise<GraphData>;
   search(q: string): Promise<SearchHit[]>;
   getNoteInfo(rel: string): Promise<NoteInfo | null>;
-  fileLinks(): Promise<[string, string][]>;
+  /** Resolved links; pass `among` to get only links between those files (cheap for Board cards). */
+  fileLinks(among?: string[]): Promise<[string, string][]>;
   previews(rels: string[]): Promise<Record<string, { preview: string; tags: string[] }>>;
   listNotes(): Promise<{ notes: { rel: string; title: string }[]; stats: IndexStats | null; ready: boolean }>;
   // MCP methods

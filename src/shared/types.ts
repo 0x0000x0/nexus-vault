@@ -179,6 +179,8 @@ export interface GraphNode {
   ghost?: boolean;
   degree: number;
   tags: string[];
+  /** Folder nodes (`dir:` ids) in a collapsed graph: number of notes they stand for. */
+  count?: number;
 }
 export interface GraphLink {
   source: string;
@@ -188,6 +190,27 @@ export interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];
   version: number;
+  /** Set when a large notes vault is shown folder-collapsed (0.0.8). */
+  collapsed?: GraphCollapseInfo;
+  /** Top-level folders ordered by note count (stable legend/colors across collapsed/full views). */
+  folders?: string[];
+  /** Total real notes in the vault (not just the nodes shown). */
+  total?: number;
+}
+export interface GraphCollapseInfo {
+  /** Notes represented by the graph (whole vault). */
+  total: number;
+  /** Folder groups shown as `dir:` nodes (or expanded). */
+  groups: number;
+  /** Folder depth used for grouping (1 = top-level folders). */
+  depth: number;
+  /** Group key currently expanded into individual notes, or null. */
+  expanded: string | null;
+}
+/** Graph request options (notes mode). 'auto' collapses large vaults, 'full' always returns every note. */
+export interface GraphOpts {
+  mode?: 'auto' | 'full';
+  expand?: string | null;
 }
 /** Semantic (local embedding) hit; also used as a citation source. */
 export interface SemanticHit {
