@@ -128,24 +128,70 @@ async function main() {
   const embeddings = new Float32Array(flat.length * dims);
   const t0 = Date.now();
   const BATCH = 16;
-  for (let i = 0; i < flat.length; i += BATCH) {
-    const slice = flat.slice(i, i + BATCH);
-    const vecs = await embedTexts(
-      slice.map((s) => s.embedText),
-      { model },
-    );
+  // Resumable checkpoints: every ~SHARD_SIZE chunks, append a shard (vectors + keys) to a work dir
+  // outside the index dir. Key = sha1(model + embedText), so edits/reorders never reuse stale vectors.
+  const SHARD_SIZE = Number(process.env.VEC_SHARD_SIZE || 512);
+  const workDir = path.join(vault, '.nexus-vectors-build');
+  fs.mkdirSync(workDir, { recursive: true });
+  const keyOf = (t: string) => sha1(model + '\n' + t);
+  const cache = new Map<string, Float32Array>();
+  for (const f of fs.readdirSync(workDir).filter((n) => /^shard-\d+\.keys\.json$/.test(n)).sort()) {
+    try {
+      const keys = JSON.parse(fs.readFileSync(path.join(workDir, f), 'utf8')) as string[];
+      const buf = fs.readFileSync(path.join(workDir, f.replace('.keys.json', '.f32')));
+      if (buf.byteLength !== keys.length * dims * 4) continue; // torn shard: ignore, redo
+      const arr = new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      keys.forEach((k, i) => cache.set(k, arr.subarray(i * dims, (i + 1) * dims)));
+    } catch { /* corrupt shard: ignore */ }
+  }
+  let shardNo = fs.readdirSync(workDir).filter((n) => /^shard-\d+\.keys\.json$/.test(n)).length;
+  const todo: number[] = [];
+  for (let i = 0; i < flat.length; i++) {
+    const v = cache.get(keyOf(flat[i].embedText));
+    if (v) embeddings.set(v, i * dims);
+    else todo.push(i);
+  }
+  const resumed = flat.length - todo.length;
+  console.log(`resume: ${resumed}/${flat.length} chunks already embedded; ${todo.length} to go (shard=${SHARD_SIZE})`);
+  const writeProgress = (done: number, rate: number) =>
+    atomicWrite(path.join(workDir, 'progress.json'), JSON.stringify({ total: flat.length, done, rate, updatedAt: new Date().toISOString(), pid: process.pid }));
+  let pendKeys: string[] = [];
+  let pendVecs: Float32Array[] = [];
+  const flush = () => {
+    if (!pendKeys.length) return;
+    const name = `shard-${String(shardNo++).padStart(5, '0')}`;
+    const out = new Float32Array(pendVecs.length * dims);
+    pendVecs.forEach((v, i) => out.set(v, i * dims));
+    atomicWrite(path.join(workDir, name + '.f32'), Buffer.from(out.buffer));
+    atomicWrite(path.join(workDir, name + '.keys.json'), JSON.stringify(pendKeys)); // keys last = commit marker
+    pendKeys = [];
+    pendVecs = [];
+  };
+  let doneNew = 0;
+  for (let i = 0; i < todo.length; i += BATCH) {
+    const idxs = todo.slice(i, i + BATCH);
+    const vecs = await embedTexts(idxs.map((j) => flat[j].embedText), { model });
     for (let k = 0; k < vecs.length; k++) {
-      embeddings.set(vecs[k], (i + k) * dims);
+      embeddings.set(vecs[k], idxs[k] * dims);
+      pendKeys.push(keyOf(flat[idxs[k]].embedText));
+      pendVecs.push(Float32Array.from(vecs[k]));
     }
-    const done = Math.min(i + BATCH, flat.length);
-    if (done === flat.length || done % 64 === 0 || done <= BATCH) {
+    doneNew += idxs.length;
+    const elapsed = (Date.now() - t0) / 1000;
+    const rate = doneNew / Math.max(1, elapsed);
+    if (pendKeys.length >= SHARD_SIZE) {
+      flush();
+      writeProgress(resumed + doneNew, rate);
+    }
+    if (doneNew === todo.length || doneNew % 64 === 0 || doneNew <= BATCH) {
+      const done = resumed + doneNew;
       const pct = ((done / flat.length) * 100).toFixed(1);
-      const elapsed = (Date.now() - t0) / 1000;
-      const rate = done / Math.max(1, elapsed);
-      const eta = ((flat.length - done) / Math.max(0.01, rate) / 60).toFixed(1);
-      process.stdout.write(`\r  embedding chunks ${done}/${flat.length} (${pct}%) ~${rate.toFixed(1)}/s eta ${eta}m   `);
+      const eta = ((todo.length - doneNew) / Math.max(0.01, rate) / 60).toFixed(1);
+      console.log(`  embedding chunks ${done}/${flat.length} (${pct}%) ~${rate.toFixed(1)}/s eta ${eta}m`);
     }
   }
+  flush();
+  writeProgress(flat.length, 0);
   console.log('');
 
   // Write chunks.jsonl + notes.json + embeddings.f32 + manifest
@@ -192,6 +238,7 @@ async function main() {
     noteCount: jobs.length,
   };
   atomicWrite(path.join(indexPath, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  fs.writeFileSync(path.join(workDir, 'DONE'), new Date().toISOString());
   console.log(`done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(JSON.stringify({ indexed: jobs.length, chunks: flat.length, model, indexPath }, null, 2));
 }
