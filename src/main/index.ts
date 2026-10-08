@@ -2,7 +2,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, session, shell, type MenuItemConstructorOptions } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ARCH_BOARD_KEY, IPC, type BoardFile, type LayoutSettings, type RecentVaultView, type SemanticHit, type SemanticStatus, type ThemePref, type VaultInfo } from '../shared/types';
+import { ARCH_BOARD_KEY, IPC, type BoardFile, type GraphOpts, type LayoutSettings, type RecentVaultView, type SemanticHit, type SemanticStatus, type ThemePref, type VaultInfo } from '../shared/types';
 import type { ArchCache, ArchModel } from '../shared/arch';
 import { startMcp, stopMcp, mcpStatus, newToken } from './mcp';
 import { type McpBackend } from './mcp-core';
@@ -135,6 +135,13 @@ async function startIndex(): Promise<void> {
 /** L2-normalized nomic cosine floor (was 0.08 for hashing-trick). Calibrate on sample queries. */
 const SEM_MIN = 0.38;
 const SEM_MIN_RELATED = 0.32;
+
+/** Renderer-supplied graph options: only known modes and a string group key. */
+function sanitizeGraphOpts(o: unknown): GraphOpts {
+  if (!o || typeof o !== 'object') return {};
+  const r = o as Record<string, unknown>;
+  return { mode: r.mode === 'full' ? 'full' : 'auto', expand: typeof r.expand === 'string' ? r.expand.slice(0, 1024) : null };
+}
 
 function buildSemantic(): void {
   dropSemantic();
@@ -667,7 +674,7 @@ function registerIpc(): void {
     clipboard.writeText(abs);
     return abs;
   });
-  handle(IPC.getGraph, () => index?.graph() ?? { nodes: [], links: [], version: -1 });
+  handle(IPC.getGraph, (_e, opts?: GraphOpts) => index?.graph(sanitizeGraphOpts(opts)) ?? { nodes: [], links: [], version: -1 });
   handle(IPC.search, (_e, q: string) => index?.search(q) ?? []);
   handle(IPC.semanticStatus, () => semanticStatus());
   handle(IPC.setSemantic, (_e, enabled: boolean) => {
@@ -700,7 +707,7 @@ function registerIpc(): void {
     return semanticStatus();
   });
   handle(IPC.getNoteInfo, (_e, rel: string) => index?.noteInfo(rel) ?? null);
-  handle('index:links', () => index?.links() ?? []);
+  handle('index:links', (_e, among?: unknown) => index?.links(Array.isArray(among) ? among.filter((x): x is string => typeof x === 'string') : undefined) ?? []);
   handle(IPC.previews, (_e, rels: string[]) => index?.previews(rels) ?? {});
   handle(IPC.listNotes, () => ({ notes: index?.listNotes() ?? [], stats: index?.stats() ?? null, ready: !!index?.ready }));
   handle(IPC.readBoard, () => (current?.readOnly ? ops.readBoardAt(codeBoardFile(current.path)) : ops.readBoard(v())));

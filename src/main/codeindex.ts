@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { watch, type FSWatcher } from 'chokidar';
 import MiniSearch from 'minisearch';
-import type { FsChange, GraphData, GraphNode, IndexStats, LinkRef, NoteInfo, SearchHit } from '../shared/types';
+import type { FsChange, GraphData, GraphNode, GraphOpts, IndexStats, LinkRef, NoteInfo, SearchHit } from '../shared/types';
 import { CODE_EXT, extOf, IGNORE_DIRS, parseImports, resolveImport, type RawImport } from './codeparse';
 import { norm, parseNote, resolveTarget } from './parse';
 import { logWarn } from './logger';
@@ -231,9 +231,14 @@ export class CodeIndex {
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }
 
-  /** All resolved file->file links (never collapsed). */
-  links(): [string, string][] {
+  /** Resolved file->file links (never collapsed). With `among`, only links whose both ends are in that set. */
+  links(among?: string[]): [string, string][] {
     const out: [string, string][] = [];
+    if (among) {
+      const set = new Set(among);
+      for (const s of set) for (const t of this.out.get(s)?.keys() ?? []) if (set.has(t)) out.push([s, t]);
+      return out;
+    }
     for (const [s, m] of this.out) for (const t of m.keys()) out.push([s, t]);
     return out;
   }
@@ -244,7 +249,16 @@ export class CodeIndex {
     return { notes: this.files.size, links, version: this.version };
   }
 
-  graph(): GraphData {
+  private graphCache: GraphData | null = null;
+
+  /** Code graph (opts ignored: repos collapse by COLLAPSE_ABOVE). Cached per index version (0.0.8). */
+  graph(_opts?: GraphOpts): GraphData {
+    if (this.graphCache && this.graphCache.version === this.version) return this.graphCache;
+    this.graphCache = this.buildGraph();
+    return this.graphCache;
+  }
+
+  private buildGraph(): GraphData {
     const src = [...this.files.keys()].filter((r) => SOURCE_EXT.has(extOf(r)));
     if (src.length > COLLAPSE_ABOVE) return this.folderGraph(src);
     const nodes = new Map<string, GraphNode>();
