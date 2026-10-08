@@ -68,8 +68,34 @@ export async function backupFile(root: string, rel: string): Promise<string | nu
   return dest;
 }
 
-async function atomicWrite(abs: string, content: string): Promise<void> {
-  const tmp = `${abs}.nexus-tmp-${process.pid}`;
+let tmpSeq = 0;
+/** Per-target write queue: saves to the same file run one after another (0.0.8 board-save race fix). */
+const writeQueues = new Map<string, Promise<void>>();
+
+/**
+ * Atomic write: write a uniquely named temp file next to the target, then rename over it.
+ * Writes to the same path are serialized so two overlapping saves can never share or steal a temp
+ * file (that race caused "Could not save board: ENOENT … rename …nexus-tmp-<pid>" on first open).
+ * Last write wins; every caller gets its own success/failure.
+ */
+export function atomicWrite(abs: string, content: string): Promise<void> {
+  return enqueueWrite(abs, () => atomicWriteNow(abs, content));
+}
+
+/** Run `job` after any pending write to the same path; failures don't block later writes. */
+function enqueueWrite(abs: string, job: () => Promise<void>): Promise<void> {
+  const key = path.resolve(abs);
+  const run = (writeQueues.get(key) ?? Promise.resolve()).then(job);
+  const tail = run.catch(() => undefined);
+  writeQueues.set(key, tail);
+  void tail.then(() => {
+    if (writeQueues.get(key) === tail) writeQueues.delete(key);
+  });
+  return run;
+}
+
+async function atomicWriteNow(abs: string, content: string): Promise<void> {
+  const tmp = `${abs}.nexus-tmp-${process.pid}-${++tmpSeq}-${Math.random().toString(36).slice(2, 8)}`;
   await fsp.writeFile(tmp, content, 'utf8');
   try {
     await fsp.rename(tmp, abs);
@@ -179,8 +205,12 @@ export async function writeBoard(root: string, data: BoardFile): Promise<void> {
 }
 
 export async function writeBoardAt(abs: string, data: BoardFile): Promise<void> {
-  await fsp.mkdir(path.dirname(abs), { recursive: true });
-  await atomicWrite(abs, JSON.stringify({ version: 1, boards: data.boards }, null, 1));
+  // mkdir + write share the per-path queue so the first-open race (two saves before .nexus exists) is covered.
+  const body = JSON.stringify({ version: 1, boards: data.boards }, null, 1);
+  return enqueueWrite(abs, async () => {
+    await fsp.mkdir(path.dirname(abs), { recursive: true });
+    await atomicWriteNow(abs, body);
+  });
 }
 
 /** Rewrite file references in board.json after a rename/move. */

@@ -12,8 +12,11 @@ Speed release for big vaults (~2,500+ notes) and big folders. Plan: `PERF-PLAN.m
 - **IPC cache** — `getGraph` is cached per index version; board links (`fileLinks`) load after the graph and only while the Board is visible
 - **Board** — `freeSlot` uses an occupancy grid (was O(n²)); auto-populate adds at most 150 note cards per folder with **Show more…**
 
+### Fixed
+- **"Could not save board" banner on first vault open** — two board saves at once shared one temp file name and the second rename failed (ENOENT). Saves to the same file now queue one after another and each uses a unique temp file; writes stay atomic (temp + rename)
+
 ### Tests
-- Unit tests for collapsed note graph, force budget table, and freeSlot (500 placements)
+- Unit tests for collapsed note graph, force budget table, freeSlot (500 placements), and concurrent board saves
 
 ## 0.0.7
 
