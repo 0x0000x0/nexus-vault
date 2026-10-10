@@ -7,13 +7,41 @@ files:
   - out/**
   - package.json
   - "!**/*.map"
+publish: null
 win:
   target:
     - target: nsis
       arch: [x64]
   signAndEditExecutable: false
+mac:
+  # Unsigned (ad-hoc) build: no Apple Developer ID, no notarization.
+  # First launch: right-click the app > Open.
+  target:
+    - target: dmg
+      arch: [universal]
+    - target: zip
+      arch: [universal]
+  category: public.app-category.productivity
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  notarize: false
+  artifactName: "Nexus-Vault-${version}-macOS-universal.${ext}"
+dmg:
+  artifactName: "Nexus-Vault-${version}-macOS-universal.${ext}"
 linux:
-  target: dir
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  category: Office
+  maintainer: "Nexus Vault Contributors"
+  synopsis: "Local-first knowledge management"
+appImage:
+  artifactName: "Nexus-Vault-${version}-Linux-x86_64.${ext}"
+deb:
+  artifactName: "Nexus-Vault-${version}-Linux-amd64.${ext}"
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

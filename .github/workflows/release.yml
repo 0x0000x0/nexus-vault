@@ -1,0 +1,125 @@
+name: Release builds
+
+# Builds Windows (NSIS installer), macOS (unsigned universal .dmg/.zip) and
+# Linux (AppImage/.deb) and attaches them to a GitHub release.
+#  - Push a tag like v0.0.9  -> draft release is created, assets uploaded, then published.
+#  - Run manually with an existing tag -> assets are added to that existing release
+#    (the build is checked to have the same app source (src/) as that tag).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to attach builds to (e.g. v0.0.8)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+            args: --win nsis --x64
+          - name: macos
+            os: macos-14
+            args: --mac --universal
+          - name: linux
+            os: ubuntu-22.04
+            args: --linux AppImage deb --x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Same app source as tag (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          git fetch --tags --force
+          git diff --stat "$TAG" HEAD -- src
+          git diff --quiet "$TAG" HEAD -- src package.json package-lock.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Package
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder ${{ matrix.args }} --publish never
+
+      - name: Check macOS signature (ad-hoc)
+        if: matrix.name == 'macos'
+        run: |
+          codesign -dv "dist/mac-universal/Nexus Vault.app" 2>&1 | head -20
+          lipo -archs "dist/mac-universal/Nexus Vault.app/Contents/MacOS/Nexus Vault"
+
+      - name: Collect assets
+        shell: bash
+        run: |
+          mkdir -p upload
+          find dist -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' -o -name '*.deb' \) -exec cp {} upload/ \;
+          ls -l upload
+          test -n "$(ls upload)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-vault-${{ matrix.name }}
+          path: upload/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd artifacts
+          sha256sum * > "Nexus-Vault-${TAG#v}-SHA256SUMS.txt"
+          cat *SHA256SUMS.txt
+
+      - name: Create draft release (tag push)
+        if: github.event_name == 'push'
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" \
+              --notes "Downloads for Windows, macOS and Linux. macOS build is unsigned: the first time, right-click Nexus Vault and choose Open."
+          fi
+
+      - name: Upload assets
+        run: gh release upload "$TAG" artifacts/* --clobber
+
+      - name: Publish release (tag push)
+        if: github.event_name == 'push'
+        run: gh release edit "$TAG" --draft=false
