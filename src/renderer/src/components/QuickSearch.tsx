@@ -9,7 +9,8 @@ export function QuickSearch({
   onClose,
   onSources,
 }: {
-  onPick: (rel: string) => void;
+  /** Open a hit. `src` (the query and its hits) is shown in the Sources panel right after the note. */
+  onPick: (rel: string, src?: { q: string; hits: Hit[] }) => void;
   onClose: () => void;
   onSources?: (q: string, hits: Hit[]) => void;
 }) {
@@ -36,7 +37,7 @@ export function QuickSearch({
         setHits([...kw, ...extra]);
         setI(0);
       });
-    }, useSem ? 120 : 60);
+    }, useSem ? 120 : 0); // 0.0.9: keyword search is ~2-10 ms, so no debounce; semantic keeps 120 ms
     return () => {
       live = false;
       clearTimeout(t);
@@ -78,10 +79,7 @@ export function QuickSearch({
             else if (e.key === 'ArrowDown') setI(Math.min(hits.length - 1, i + 1));
             else if (e.key === 'ArrowUp') setI(Math.max(0, i - 1));
             else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && q.trim() && hits.length && onSources) onSources(q.trim(), hits);
-            else if (e.key === 'Enter' && hits[i]) {
-              if (q.trim() && onSources) onSources(q.trim(), hits);
-              onPick(hits[i].rel);
-            }
+            else if (e.key === 'Enter' && hits[i]) onPick(hits[i].rel, q.trim() && onSources ? { q: q.trim(), hits } : undefined);
             else return;
             e.preventDefault();
           }}
@@ -106,10 +104,7 @@ export function QuickSearch({
         <div className="qlist" ref={listRef}>
           {hits.length === 0 && <div className="muted" style={{ padding: 12 }}>{q ? 'No matches.' : 'No notes indexed yet.'}</div>}
           {hits.map((h, k) => (
-            <div key={h.rel} className={`qi${k === i ? ' on' : ''}`} onMouseEnter={() => setI(k)} onClick={() => {
-                if (q.trim() && onSources) onSources(q.trim(), hits);
-                onPick(h.rel);
-              }}>
+            <div key={h.rel} className={`qi${k === i ? ' on' : ''}`} onMouseEnter={() => setI(k)} onClick={() => onPick(h.rel, q.trim() && onSources ? { q: q.trim(), hits } : undefined)}>
               <div className="qt">
                 {mark(h.title)} {h.folder && <small>{h.folder}</small>} {h.semantic && <span className="badge" title={`Similarity ${Math.round(h.score * 100)}%`}>similar</span>}
               </div>

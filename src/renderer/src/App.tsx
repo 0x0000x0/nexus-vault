@@ -18,6 +18,7 @@ import { ToolStrip } from './components/ToolStrip';
 import { VaultPicker } from './components/VaultPicker';
 import { Ctx, IndexVersionCtx, dirOf, errMsg, type AppActions } from './ctx';
 import { shortCode } from '../../shared/log-format';
+import { afterNoteShown } from './note-shown';
 import { back as navBack, canBack, canForward, createNav, forward as navForward, push as navPush, replace as navReplace, type Cam, type NavSnap, type NavState } from './nav-history';
 
 const nexus = window.nexus;
@@ -671,10 +672,14 @@ export function App() {
                   setSources({ q, hits: hits.slice(0, 30) });
                   setQuick(false);
                 }}
-                onPick={(rel) => {
+                onPick={(rel, src) => {
                   setQuick(false);
                   actions.openNote(rel);
-                  setGraphFocus({ rel, n: next() });
+                  // 0.0.9: the note paints first; Sources and the graph camera follow right after.
+                  afterNoteShown(rel, () => {
+                    if (src) setSources({ q: src.q, hits: src.hits.slice(0, 30) });
+                    setGraphFocus({ rel, n: next() });
+                  });
                 }}
               />
             )}

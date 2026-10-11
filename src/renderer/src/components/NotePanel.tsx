@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FsChange, NoteFile, NoteInfo, SemanticHit } from '../../../shared/types';
 import { baseName, errMsg, noteTitle, useApp, useIndexVersion } from '../ctx';
 import { highlight } from '../highlight';
+import { noteShown } from '../note-shown';
 
 interface Props {
   rel: string | null;
@@ -20,8 +21,25 @@ function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 }
 
-/** Markdown -> sanitized HTML; [[links]] become clickable anchors with data-wikilink. */
+// 0.0.9: small LRU of rendered notes (going back to a note skips marked + DOMPurify).
+const htmlCache = new Map<string, string>();
 function render(md: string): string {
+  const hit = htmlCache.get(md);
+  if (hit !== undefined) {
+    htmlCache.delete(md);
+    htmlCache.set(md, hit);
+    return hit;
+  }
+  const html = renderUncached(md);
+  if (md.length < 400_000) {
+    htmlCache.set(md, html);
+    if (htmlCache.size > 40) htmlCache.delete(htmlCache.keys().next().value as string);
+  }
+  return html;
+}
+
+/** Markdown -> sanitized HTML; [[links]] become clickable anchors with data-wikilink. */
+function renderUncached(md: string): string {
   const body = md.replace(/^---\r?\n[\s\S]*?\r?\n---\s*\n?/, (fm) => '```yaml\n' + fm.replace(/^---\r?\n|\r?\n---\s*\n?$/g, '') + '\n```\n');
   const withLinks = body.replace(/(!?)\[\[([^\[\]\n]+?)\]\]/g, (_m, bang: string, inner: string) => {
     const pipe = inner.indexOf('|');
@@ -67,7 +85,7 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
     if (!f || !d || readOnly) return true;
     try {
       const nf = await window.nexus.writeNote(f.rel, t, f.mtimeMs);
-      setFile(nf);
+      setFile((cur) => (cur && cur.rel === f.rel ? nf : cur));
       setExternal(false);
       setSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       return true;
@@ -75,7 +93,7 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
       const m = errMsg(e);
       if (m.startsWith('CONFLICT') && window.confirm('This note was changed outside Nexus Vault since you opened it.\n\nOverwrite it with your version? (The other version is backed up in .nexus-backups.)')) {
         const nf = await window.nexus.writeNote(f.rel, t);
-        setFile(nf);
+        setFile((cur) => (cur && cur.rel === f.rel ? nf : cur));
         setExternal(false);
         return true;
       }
@@ -84,15 +102,28 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
     }
   }, [app, readOnly]);
 
-  // Switch notes: save the previous one first.
+  // Switch notes: save the previous one and read the next one in parallel (0.0.9; they are different files).
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      const next = rel ? window.nexus.readNote(rel).then((f) => ({ f }), (e: unknown) => ({ e })) : null;
       await save();
       if (cancelled) return;
       setSavedAt(null);
-      if (rel) await load(rel);
-      else {
+      if (next) {
+        const r = await next;
+        if (cancelled) return;
+        if ('f' in r) {
+          setFile(r.f);
+          setText(r.f.content);
+          setErr(null);
+          setExternal(false);
+        } else {
+          setFile(null);
+          setText('');
+          setErr(errMsg(r.e));
+        }
+      } else {
         setFile(null);
         setText('');
       }
@@ -106,6 +137,9 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
   useEffect(() => {
     if (editRequest > 0 && !readOnly) setMode('edit');
   }, [editRequest, readOnly]);
+
+  // 0.0.9: tell waiters (Ctrl+K Enter → Sources panel, graph focus) the note is on screen.
+  useEffect(() => noteShown(file?.rel ?? null), [file?.rel]);
 
   // Backlinks etc. refresh whenever the index changes.
   useEffect(() => {
