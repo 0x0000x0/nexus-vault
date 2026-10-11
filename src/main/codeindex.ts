@@ -48,6 +48,8 @@ export class CodeIndex {
   byPath = new Map<string, string>();
   version = 0;
   ready = false;
+  /** 0.0.9: MiniSearch is filled (start() builds it in chunks after `ready`). */
+  private searchReady = false;
   truncated = false;
 
   constructor(
@@ -99,12 +101,15 @@ export class CodeIndex {
     }
     this.onProgress('Building graph…', list.length, list.length);
     this.rebuildNames();
-    this.mini.addAll([...this.files.values()].map((f) => this.doc(f)));
     this.relinkAll();
     this.ready = true;
     this.version++;
     this.onProgress('', list.length, list.length);
     this.onChange(this.stats(), { dirs: [], files: [] });
+    // 0.0.9: full-text index after the graph/board can show, in chunks (keeps the main process responsive).
+    await this.mini.addAllAsync([...this.files.values()].map((f) => this.doc(f)), { chunkSize: 100 });
+    this.searchReady = true;
+    if (this.closed) return;
     this.startWatcher();
   }
 
@@ -327,6 +332,16 @@ export class CodeIndex {
       return [...this.files.keys()]
         .slice(0, limit)
         .map((r) => ({ rel: r, title: baseOf(r), folder: dirOf(r), snippet: '', score: 0 }));
+    if (!this.searchReady) {
+      const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+      const hits: SearchHit[] = [];
+      for (const r of this.files.keys()) {
+        const b = r.toLowerCase();
+        if (words.every((w) => b.includes(w))) hits.push({ rel: r, title: baseOf(r), folder: dirOf(r), snippet: '', score: 1 });
+        if (hits.length >= limit) break;
+      }
+      return hits;
+    }
     let res = this.mini.search(query, { combineWith: 'AND' });
     if (!res.length) res = this.mini.search(query, { combineWith: 'OR' });
     return res.slice(0, limit).map((r) => {

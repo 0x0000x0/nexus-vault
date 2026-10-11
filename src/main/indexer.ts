@@ -38,6 +38,8 @@ export class VaultIndex {
   /** 0.0.9: bumps only when the set of note paths changes (create/delete/rename). */
   namesVersion = 0;
   ready = false;
+  /** 0.0.9: MiniSearch is filled (start() builds it in chunks after `ready`). */
+  private searchReady = false;
   /** Optional per-note change hook (semantic index). null content = removed. */
   onNote: ((rel: string, note: { title: string; content: string } | null) => void) | null = null;
 
@@ -76,13 +78,17 @@ export class VaultIndex {
       await Promise.all(files.slice(i, i + 32).map((r) => this.load(r)));
     }
     this.rebuildNames();
-    this.mini.addAll([...this.notes.values()].map((n) => this.doc(n)));
     this.relinkAll();
     this.ready = true;
     this.version++;
     this.topoVersion++;
     this.namesVersion++;
+    // 0.0.9: tree/graph/board can show now; the full-text index builds in small chunks after this,
+    // so the main process keeps answering IPC (addAll blocked it ~600-700 ms at 3k notes).
     this.emit({ dirs: [], files: [] });
+    await this.mini.addAllAsync([...this.notes.values()].map((n) => this.doc(n)), { chunkSize: 100 });
+    this.searchReady = true;
+    if (this.closed) return;
     this.startWatcher();
   }
 
@@ -134,6 +140,11 @@ export class VaultIndex {
   private async flush(): Promise<void> {
     this.timer = null;
     if (this.closed) return;
+    if (!this.searchReady) {
+      // Startup is still filling the search index; apply edits right after it.
+      this.schedule(50);
+      return;
+    }
     const batch = [...this.pending];
     const dirs = [...this.pendingDirs];
     this.pending.clear();
@@ -310,9 +321,19 @@ export class VaultIndex {
         .slice(0, limit)
         .map((n) => ({ rel: n.rel, title: n.title, folder: dirOf(n.rel), snippet: '', score: 0 }));
     }
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!this.searchReady) {
+      // First ~0.5 s after launch: title match until the full-text index is built.
+      const hits: SearchHit[] = [];
+      for (const n of this.notes.values()) {
+        const t = n.title.toLowerCase();
+        if (words.every((w) => t.includes(w))) hits.push({ rel: n.rel, title: n.title, folder: dirOf(n.rel), snippet: '', score: 1 });
+        if (hits.length >= limit) break;
+      }
+      return hits;
+    }
     const res = this.mini.search(query, { combineWith: 'AND' });
     const res2 = res.length ? res : this.mini.search(query, { combineWith: 'OR' });
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return res2.slice(0, limit).map((r) => {
       const n = this.notes.get(r.id as string)!;
       return { rel: n.rel, title: n.title, folder: dirOf(n.rel), snippet: snippet(n.content, [...words, ...r.terms]), score: r.score };
