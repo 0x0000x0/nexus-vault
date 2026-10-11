@@ -1,5 +1,5 @@
 // Electron main process for Nexus Vault M0. Written by Grok Bot (replaces OpenCode WIP).
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, session, shell, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, session, shell, utilityProcess, type MenuItemConstructorOptions } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ARCH_BOARD_KEY, IPC, type BoardFile, type GraphOpts, type LayoutSettings, type RecentVaultView, type SemanticHit, type SemanticStatus, type ThemePref, type VaultInfo } from '../shared/types';
@@ -19,14 +19,14 @@ import {
   deleteSnapshot,
   deleteSnapshotFromDir,
 } from './snapshots';
-import { VaultIndex } from './indexer';
-import { CodeIndex } from './codeindex';
+import { IndexClient, type HostTransport } from './index-client';
+import type { HostIn, HostOut } from './index-host-core';
 import { collectRootEntries, inferArchitecture, type PackageJsonHint } from './archinfer';
 import { layoutArch } from '../shared/arch-layout';
 import { detectRepo, extractZip } from './repo';
 import crypto from 'node:crypto';
 import * as ops from './fileops';
-import { addConnectionText, hasLinkTo, linkNameFor, removeLinkText } from './parse';
+import { addConnectionText } from './parse';
 import { resolveInVault } from './vault';
 import { flushSettings, getSettings, updateSettings } from './settings';
 import { countNotes, listDir, safeCopy } from './vault';
@@ -55,7 +55,8 @@ const isDev = !app.isPackaged && !!process.env.ELECTRON_RENDERER_URL;
 let win: BrowserWindow | null = null;
 let current: VaultInfo | null = null;
 let countToken = 0;
-let index: VaultIndex | CodeIndex | null = null;
+/** 0.0.9: the index lives in its own process; this is the main-process handle. */
+let index: IndexClient | null = null;
 let semanticIdx: SemanticIndex | null = null;
 let mcpStarted = false;
 let archCache: ArchCache | null = null;
@@ -68,19 +69,19 @@ const backendFactory = (): McpBackend => {
     // F: citations — keyword + semantic (if enabled) merged, memory packs applied, path/snippet/startLine per hit.
     search: async (q, limit) => {
       const n = Math.min(50, Math.max(1, limit));
-      const kw = index?.search(q, n * 2) ?? [];
+      const kw = (await index?.search(q, n * 2)) ?? [];
       const sem =
         semanticIdx && q.trim() ? await semanticIdx.search(q, n * 2, SEM_MIN) : [];
-      const vi = index instanceof VaultIndex ? index : null;
-      return mergeCitations(kw, sem, packs(), n, (rel) => vi?.noteContent(rel)).map((c) => ({ rel: c.path, ...c }));
+      const contents = index?.mode === 'notes' ? await index.noteContents([...new Set([...kw.map((h) => h.rel), ...sem.map((h) => h.rel)])]) : {};
+      return mergeCitations(kw, sem, packs(), n, (rel) => contents?.[rel]).map((c) => ({ rel: c.path, ...c }));
     },
-    listNotes: () => (index?.listNotes() ?? []).filter((x) => !hidden(x.rel)),
+    listNotes: async () => ((await index?.listNotes()) ?? []).filter((x) => !hidden(x.rel)),
     readNote: async (rel) => {
       if (hidden(rel)) throw new Error('This note is excluded from AI access (memory pack: Never include)');
       return (await ops.readNote(root, rel)).content;
     },
-    backlinks: (rel) =>
-      (index?.noteInfo(rel)?.backlinks ?? [])
+    backlinks: async (rel) =>
+      ((await index?.noteInfo(rel))?.backlinks ?? [])
         .filter((b) => !hidden(b.rel))
         .map((b) => ({
           rel: b.rel,
@@ -107,28 +108,64 @@ async function startIndex(): Promise<void> {
   archCache = null;
   dropSemantic();
   if (!current) return;
-  const onChange = (stats: import('../shared/types').IndexStats, fsChange: import('../shared/types').FsChange) => {
-    if (index !== idx) return;
-    win?.webContents.send(IPC.evIndexChanged, stats);
-    if (fsChange.dirs.length || fsChange.files.length) win?.webContents.send(IPC.evFsChanged, fsChange);
-  };
-  const idx: VaultIndex | CodeIndex =
-    current.mode === 'code'
-      ? new CodeIndex(current.path, onChange, (label, done, total) => {
-          if (index === idx) progress(label, done, total);
-        })
-      : new VaultIndex(current.path, onChange);
+  const mode = current.mode === 'code' ? 'code' : 'notes';
+  const idx: IndexClient = new IndexClient(mode, current.path, forkIndexHost(), {
+    onChange: (stats, fsChange) => {
+      if (index !== idx) return;
+      win?.webContents.send(IPC.evIndexChanged, stats);
+      if (fsChange.dirs.length || fsChange.files.length) win?.webContents.send(IPC.evFsChanged, fsChange);
+    },
+    onProgress: (label, done, total) => {
+      if (index === idx) progress(label, done, total);
+    },
+    onLog: (tag, msg, err) => logWarn(tag, msg, err),
+    onReady: (st, info) => {
+      if (index !== idx) return;
+      logInfo('index', `index-ready notes=${st.notes} links=${st.links} mode=${mode} cache=${JSON.stringify(info)}`);
+    },
+  });
   index = idx;
   idx
-    .start()
+    .start(mode === 'notes' ? indexCacheFile(current.path) : null)
     .then(() => {
       if (index !== idx) return;
-      const st = idx.stats();
-      logInfo('index', `index-ready notes=${st.notes} links=${st.links} mode=${current?.mode ?? '?'}`);
       if (getSettings().semanticSearch) buildSemantic();
-      if (current?.mode === 'code' && idx instanceof CodeIndex) void buildArchModel(false);
+      if (mode === 'code') void buildArchModel(false);
     })
     .catch((e) => logError('index', 'index start failed', e));
+}
+
+/** 0.0.9: persistent index cache, one file per vault path, in userData (never inside the vault). */
+function indexCacheFile(vaultPath: string): string {
+  const h = crypto.createHash('sha1').update(path.resolve(vaultPath)).digest('hex').slice(0, 16);
+  return path.join(app.getPath('userData'), 'index-cache', `${h}.v8`);
+}
+
+/** 0.0.9: start the index process (Electron utilityProcess running out/main/index-host.js). */
+function forkIndexHost(): HostTransport {
+  const child = utilityProcess.fork(path.join(__dirname, 'index-host.js'), [], { serviceName: 'Nexus Vault index', stdio: 'inherit' });
+  let spawned = false;
+  let exited = false;
+  const queue: HostIn[] = [];
+  child.once('spawn', () => {
+    spawned = true;
+    for (const m of queue.splice(0)) child.postMessage(m);
+  });
+  child.once('exit', (code) => {
+    exited = true;
+    if (code) logError('index', `index process exited with code ${code}`);
+  });
+  return {
+    post: (m) => {
+      if (exited) return;
+      if (spawned) child.postMessage(m);
+      else queue.push(m);
+    },
+    onMessage: (f) => child.on('message', (m: HostOut) => f(m)),
+    kill: () => {
+      if (!exited) child.kill();
+    },
+  };
 }
 
 // ---------- B: vector semantic search (Ollama nomic-embed-text + .nexus-vectors; OFF by default) ----------
@@ -145,10 +182,11 @@ function sanitizeGraphOpts(o: unknown): GraphOpts {
 
 function buildSemantic(): void {
   dropSemantic();
-  if (!(index instanceof VaultIndex)) {
+  if (index?.mode !== 'notes') {
     logWarn('semantic', 'semantic index skipped (not a notes VaultIndex)');
     return;
   }
+  const vi = index;
   if (!current) return;
   const s = getSettings();
   const idx = new SemanticIndex({
@@ -158,16 +196,17 @@ function buildSemantic(): void {
     baseUrl: s.embedBaseUrl,
   });
   const loaded = idx.load();
-  index.onNote = (rel, n) => (n ? idx.upsert(rel, n.title, n.content) : idx.remove(rel));
+  vi.onNote = (rel, n) => (n ? idx.upsert(rel, n.title, n.content) : idx.remove(rel));
+  void vi.setNoteEvents(true).catch(() => undefined);
   semanticIdx = idx;
   void idx.refreshOllama().then(() => {
     const st = idx.status();
     logInfo('semantic', `semantic load ok=${loaded} notes=${st.indexed} chunks=${st.chunks} ollama=${st.ollama} needsRebuild=${st.needsRebuild}`);
     // If empty index and ollama up, kick a background rebuild
-    if ((!loaded || st.indexed === 0 || st.needsRebuild) && st.ollama === 'ok' && index instanceof VaultIndex) {
-      const notes = index.allNotes().map((n) => ({ rel: n.rel, title: n.title, content: n.content }));
-      void idx
-        .rebuild(notes, (done, total) => progress('Semantic index', done, total))
+    if ((!loaded || st.indexed === 0 || st.needsRebuild) && st.ollama === 'ok' && index === vi) {
+      void vi
+        .allNotes()
+        .then((notes) => idx.rebuild(notes.map((n) => ({ rel: n.rel, title: n.title, content: n.content })), (done, total) => progress('Semantic index', done, total)))
         .then(() => {
           progress('', 0, 0);
           logInfo('semantic', `semantic rebuild done size=${idx.size()}`);
@@ -180,7 +219,10 @@ function buildSemantic(): void {
   });
 }
 function dropSemantic(): void {
-  if (index instanceof VaultIndex) index.onNote = null;
+  if (index) {
+    index.onNote = null;
+    void index.setNoteEvents(false).catch(() => undefined);
+  }
   semanticIdx?.close();
   semanticIdx = null;
 }
@@ -310,20 +352,21 @@ async function findMarkerFiles(root: string, rels: string[]): Promise<string[]> 
 }
 
 async function buildArchModel(force = false): Promise<ArchModel | null> {
-  if (!current || current.mode !== 'code' || !(index instanceof CodeIndex) || !index.ready) return null;
+  if (!current || current.mode !== 'code' || index?.mode !== 'code' || !index.ready) return null;
+  const ci = index;
   const repo = current.path;
   if (!force && archCache?.model) return archCache.model;
   progress('Building architecture…', 0, 1);
   try {
-    const rels = index.rels();
+    const rels = (await ci.rels()) ?? [];
     const packageJson = await readPackageJsonHint(repo);
     const rootEntries = await listRootEntries(repo);
     const markerFiles = await findMarkerFiles(repo, rels);
     const model = inferArchitecture({
       rootName: current.name,
       rels,
-      edges: index.importEdges(),
-      externals: index.externalPackages(),
+      edges: (await ci.importEdges()) as Parameters<typeof inferArchitecture>[0]['edges'],
+      externals: (await ci.externalPackages()) as Parameters<typeof inferArchitecture>[0]['externals'],
       packageJson,
       rootEntries: rootEntries.length ? rootEntries : collectRootEntries(rels),
       markerFiles,
@@ -674,13 +717,13 @@ function registerIpc(): void {
     clipboard.writeText(abs);
     return abs;
   });
-  handle(IPC.getGraph, (_e, opts?: GraphOpts) => index?.graph(sanitizeGraphOpts(opts)) ?? { nodes: [], links: [], version: -1 });
-  handle(IPC.search, (_e, q: string) => index?.search(q) ?? []);
+  handle(IPC.getGraph, async (_e, opts?: GraphOpts) => (await index?.graph(sanitizeGraphOpts(opts))) ?? { nodes: [], links: [], version: -1 });
+  handle(IPC.search, async (_e, q: string) => (await index?.search(q)) ?? []);
   handle(IPC.semanticStatus, () => semanticStatus());
   handle(IPC.setSemantic, (_e, enabled: boolean) => {
     updateSettings({ semanticSearch: enabled === true });
     if (enabled === true) {
-      if (!semanticIdx && index instanceof VaultIndex && index.ready) buildSemantic();
+      if (!semanticIdx && index?.mode === 'notes' && index.ready) buildSemantic();
     } else dropSemantic();
     return semanticStatus();
   });
@@ -695,8 +738,8 @@ function registerIpc(): void {
     return applyPolicy(hits, currentPacks()).slice(0, 5);
   });
   handle(IPC.semanticRebuild, async () => {
-    if (!semanticIdx || !(index instanceof VaultIndex)) return semanticStatus();
-    const notes = index.allNotes().map((n) => ({ rel: n.rel, title: n.title, content: n.content }));
+    if (!semanticIdx || index?.mode !== 'notes') return semanticStatus();
+    const notes = (await index.allNotes()).map((n) => ({ rel: n.rel, title: n.title, content: n.content }));
     try {
       await semanticIdx.rebuild(notes, (done, total) => progress('Semantic index', done, total));
       progress('', 0, 0);
@@ -706,10 +749,15 @@ function registerIpc(): void {
     }
     return semanticStatus();
   });
-  handle(IPC.getNoteInfo, (_e, rel: string) => index?.noteInfo(rel) ?? null);
-  handle('index:links', (_e, among?: unknown) => index?.links(Array.isArray(among) ? among.filter((x): x is string => typeof x === 'string') : undefined) ?? []);
-  handle(IPC.previews, (_e, rels: string[]) => index?.previews(rels) ?? {});
-  handle(IPC.listNotes, () => ({ notes: index?.listNotes() ?? [], stats: index?.stats() ?? null, ready: !!index?.ready }));
+  handle(IPC.getNoteInfo, async (_e, rel: string) => (await index?.noteInfo(rel)) ?? null);
+  handle('index:links', async (_e, among?: unknown) => (await index?.links(Array.isArray(among) ? among.filter((x): x is string => typeof x === 'string') : undefined)) ?? []);
+  handle(IPC.previews, async (_e, rels: string[]) => (await index?.previews(rels)) ?? {});
+  handle(IPC.listNotes, async () => {
+    const i = index;
+    if (!i || !i.ready) return { notes: [], stats: i?.lastStats ?? null, ready: false };
+    const [notes, stats] = await Promise.all([i.listNotes(), i.stats()]);
+    return { notes, stats, ready: true };
+  });
   handle(IPC.readBoard, () => (current?.readOnly ? ops.readBoardAt(codeBoardFile(current.path)) : ops.readBoard(v())));
   handle(IPC.writeBoard, (_e, data: BoardFile) => (current?.readOnly ? ops.writeBoardAt(codeBoardFile(current.path), data) : ops.writeBoard(v(), data)));
   handle(IPC.archGet, async () => {
@@ -724,7 +772,7 @@ function registerIpc(): void {
   });
   handle(IPC.archRebuild, async () => {
     if (!current || current.mode !== 'code') throw new Error('Architecture is only available for code repos');
-    if (!(index instanceof CodeIndex) || !index.ready) throw new Error('Code index is not ready yet');
+    if (index?.mode !== 'code' || !index.ready) throw new Error('Code index is not ready yet');
     const m = await buildArchModel(true);
     if (!m) throw new Error('Could not build architecture');
     return m;
@@ -764,21 +812,23 @@ function registerIpc(): void {
   });
   handle(IPC.addConnection, async (_e, src: string, target: string, label?: string) => {
     const root = vw();
-    if (!(index instanceof VaultIndex)) throw new Error('Index not ready');
+    const ix = index;
+    if (ix?.mode !== 'notes') throw new Error('Index not ready');
     const note = await ops.readNote(root, src);
-    if (hasLinkTo(note.content, src, target, index.byName, index.byPath)) return false;
-    await ops.writeNote(root, src, addConnectionText(note.content, linkNameFor(target, index.byName), label || undefined));
-    index.touch(src);
+    if (await ix.hasLinkTo(note.content, src, target)) return false;
+    await ops.writeNote(root, src, addConnectionText(note.content, await ix.linkNameFor(target), label || undefined));
+    ix.touch(src);
     return true;
   });
   handle(IPC.removeConnection, async (_e, src: string, target: string) => {
     const root = vw();
-    if (!(index instanceof VaultIndex)) throw new Error('Index not ready');
+    const ix = index;
+    if (ix?.mode !== 'notes') throw new Error('Index not ready');
     const note = await ops.readNote(root, src);
-    const next = removeLinkText(note.content, src, target, index.byName, index.byPath);
+    const next = await ix.removeLinkText(note.content, src, target);
     if (next === note.content) return false;
     await ops.writeNote(root, src, next);
-    index.touch(src);
+    ix.touch(src);
     return true;
   });
 
@@ -991,6 +1041,17 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+// 0.0.9: let the index process write its cache (if it has unsaved changes) before quitting; capped at 3 s.
+let indexClosedForQuit = false;
+app.on('before-quit', (e) => {
+  if (indexClosedForQuit || !index) return;
+  e.preventDefault();
+  indexClosedForQuit = true;
+  const i = index;
+  index = null;
+  void i.close().finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => {

@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 
 export interface McpBackend {
   search(q: string, limit: number): Promise<{ rel: string; title: string; folder: string; snippet: string; score: number; startLine?: number; source?: string }[]> | { rel: string; title: string; folder: string; snippet: string; score: number; startLine?: number; source?: string }[];
-  listNotes(): { rel: string; title: string }[];
+  listNotes(): Promise<{ rel: string; title: string }[]> | { rel: string; title: string }[];
   readNote(rel: string): Promise<string>;
-  backlinks(rel: string): { rel: string; title: string; context: string }[];
+  backlinks(rel: string): Promise<{ rel: string; title: string; context: string }[]> | { rel: string; title: string; context: string }[];
   appendNote?(rel: string, text: string): Promise<void>;
   createNote?(dir: string, name: string, content: string): Promise<string>;
 }
@@ -214,7 +214,7 @@ export async function handleRpc(
         }
       }
       if (name === 'list_notes') {
-        const notes = backend.listNotes();
+        const notes = await backend.listNotes();
         return {
           jsonrpc: '2.0',
           id,
@@ -276,7 +276,7 @@ export async function handleRpc(
       }
     }
     if (name === 'list_notes') {
-      const notes = backend.listNotes();
+      const notes = await backend.listNotes();
       return {
         jsonrpc: '2.0',
         id,
