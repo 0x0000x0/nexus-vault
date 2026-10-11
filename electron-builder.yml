@@ -7,6 +7,13 @@ files:
   - out/**
   - package.json
   - "!**/*.map"
+# The index process (utilityProcess) and the modules it loads run from app.asar.unpacked.
+asarUnpack:
+  - out/main/index-host.js
+  - out/main/chunks/**
+  - node_modules/chokidar/**
+  - node_modules/readdirp/**
+  - node_modules/minisearch/**
 publish: null
 win:
   target:

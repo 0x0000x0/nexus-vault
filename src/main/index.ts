@@ -143,23 +143,26 @@ function indexCacheFile(vaultPath: string): string {
 
 /** 0.0.9: start the index process (Electron utilityProcess running out/main/index-host.js). */
 function forkIndexHost(): HostTransport {
-  const child = utilityProcess.fork(path.join(__dirname, 'index-host.js'), [], { serviceName: 'Nexus Vault index', stdio: 'inherit' });
-  let spawned = false;
+  // stdio 'pipe' (not 'inherit'): a packaged Windows GUI app has no console handles to inherit.
+  // Messages are posted straight away; Electron queues them until the child is up.
+  // Packaged: run the host from app.asar.unpacked (see asarUnpack in electron-builder.yml); a utility process
+  // cannot reliably start a script that lives inside app.asar on Windows.
+  const hostDir = app.isPackaged ? __dirname.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1') : __dirname;
+  const child = utilityProcess.fork(path.join(hostDir, 'index-host.js'), [], { serviceName: 'Nexus Vault index', stdio: 'pipe' });
   let exited = false;
-  const queue: HostIn[] = [];
-  child.once('spawn', () => {
-    spawned = true;
-    for (const m of queue.splice(0)) child.postMessage(m);
-  });
+  const t0 = Date.now();
+  const pipeLog = (s: NodeJS.ReadableStream | null, tag: string) =>
+    s?.on('data', (d: Buffer) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) logWarn('index', `${tag}: ${l.slice(0, 500)}`); });
+  pipeLog(child.stdout, 'host stdout');
+  pipeLog(child.stderr, 'host stderr');
+  child.once('spawn', () => logInfo('index', `index-host spawned in ${Date.now() - t0} ms`));
   child.once('exit', (code) => {
     exited = true;
     if (code) logError('index', `index process exited with code ${code}`);
   });
   return {
     post: (m) => {
-      if (exited) return;
-      if (spawned) child.postMessage(m);
-      else queue.push(m);
+      if (!exited) child.postMessage(m);
     },
     onMessage: (f) => child.on('message', (m: HostOut) => f(m)),
     kill: () => {
