@@ -7,7 +7,7 @@ import MiniSearch from 'minisearch';
 import type { FsChange, GraphData, GraphNode, GraphOpts, IndexStats, LinkRef, NoteInfo, SearchHit } from '../shared/types';
 import { CODE_EXT, extOf, IGNORE_DIRS, parseImports, resolveImport, type RawImport } from './codeparse';
 import { norm, parseNote, resolveTarget } from './parse';
-import { logWarn } from './logger';
+import { logWarn } from './index-log';
 
 const SOURCE_EXT = new Set(['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'py', 'go', 'rs', 'java', 'kt', 'cs', 'rb', 'php', 'c', 'h', 'cpp', 'hpp', 'swift', 'vue', 'svelte', 'md']);
 const MAX_FILES = 20000;

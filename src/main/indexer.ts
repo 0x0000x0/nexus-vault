@@ -2,18 +2,33 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import v8 from 'node:v8';
 import { watch, type FSWatcher } from 'chokidar';
 import MiniSearch from 'minisearch';
 import type { FsChange, GraphData, GraphOpts, IndexStats, LinkRef, NoteInfo, SearchHit } from '../shared/types';
 import { COLLAPSE_ABOVE_NOTES, collapsedNoteGraph, fullNoteGraph } from './notegraph';
 import { norm, parseNote, resolveTarget, titleOf, type ParsedNote } from './parse';
-import { logWarn } from './logger';
+import { logWarn } from './index-log';
 
 interface NoteRec {
   rel: string;
   title: string;
   content: string;
   parsed: ParsedNote;
+}
+
+const MINI_OPTS = {
+  fields: ['title', 'content', 'tags', 'headings'],
+  storeFields: ['title'],
+  searchOptions: { boost: { title: 4, headings: 2, tags: 2 }, prefix: true, fuzzy: 0.15 },
+};
+/** 0.0.9: bump when NoteRec/ParsedNote/MiniSearch options change, so old caches are ignored. */
+const CACHE_VERSION = 1;
+interface CacheFile {
+  v: number;
+  root: string;
+  notes: [rel: string, mtimeMs: number, size: number, rec: NoteRec][];
+  mini: unknown;
 }
 
 const toRel = (root: string, abs: string) => path.relative(root, abs).split(path.sep).join('/');
@@ -43,16 +58,68 @@ export class VaultIndex {
   /** Optional per-note change hook (semantic index). null content = removed. */
   onNote: ((rel: string, note: { title: string; content: string } | null) => void) | null = null;
 
-  constructor(root: string, private onChange: (stats: IndexStats, fsChange: FsChange) => void) {
+  /** 0.0.9: file stamps (mtime, size) of what is indexed; a note is reused from the cache only if both match. */
+  private stamps = new Map<string, [number, number]>();
+  private cacheTimer: NodeJS.Timeout | null = null;
+  private cacheDirty = false;
+  /** How the last start() went (for logs and benches). */
+  startInfo = { cached: 0, read: 0, miniFromCache: false, cacheMs: 0 };
+
+  /**
+   * @param cacheFile 0.0.9: optional persistent index cache (lives in userData, never in the vault).
+   *   Notes whose mtime+size match are not re-read or re-parsed, and the full-text index is restored.
+   */
+  constructor(
+    root: string,
+    private onChange: (stats: IndexStats, fsChange: FsChange) => void,
+    private cacheFile: string | null = null,
+  ) {
     this.root = root;
   }
 
   private newMini() {
-    return new MiniSearch<{ id: string; title: string; content: string; tags: string; headings: string }>({
-      fields: ['title', 'content', 'tags', 'headings'],
-      storeFields: ['title'],
-      searchOptions: { boost: { title: 4, headings: 2, tags: 2 }, prefix: true, fuzzy: 0.15 },
-    });
+    return new MiniSearch<{ id: string; title: string; content: string; tags: string; headings: string }>(MINI_OPTS);
+  }
+
+  private async readCache(): Promise<CacheFile | null> {
+    if (!this.cacheFile) return null;
+    try {
+      const c = v8.deserialize(await fsp.readFile(this.cacheFile)) as CacheFile;
+      if (c?.v !== CACHE_VERSION || c.root !== this.root || !Array.isArray(c.notes)) return null;
+      return c;
+    } catch {
+      return null; // missing or unreadable cache = cold start
+    }
+  }
+
+  /** Write the cache now (atomic: temp file + rename). */
+  async saveCache(): Promise<void> {
+    if (!this.cacheFile || !this.ready || !this.searchReady) return;
+    if (this.cacheTimer) clearTimeout(this.cacheTimer);
+    this.cacheTimer = null;
+    this.cacheDirty = false;
+    const notes: CacheFile['notes'] = [];
+    for (const [rel, n] of this.notes) {
+      const st = this.stamps.get(rel);
+      if (st) notes.push([rel, st[0], st[1], n]);
+    }
+    const data: CacheFile = { v: CACHE_VERSION, root: this.root, notes, mini: this.mini.toJSON() };
+    const tmp = `${this.cacheFile}.${process.pid}.tmp`;
+    try {
+      await fsp.mkdir(path.dirname(this.cacheFile), { recursive: true });
+      await fsp.writeFile(tmp, v8.serialize(data));
+      await fsp.rename(tmp, this.cacheFile);
+    } catch (e) {
+      logWarn('index', 'could not write index cache', e);
+      await fsp.rm(tmp, { force: true }).catch(() => undefined);
+    }
+  }
+
+  private scheduleCacheSave(ms = 4000): void {
+    if (!this.cacheFile) return;
+    this.cacheDirty = true;
+    if (this.cacheTimer) clearTimeout(this.cacheTimer);
+    this.cacheTimer = setTimeout(() => void this.saveCache(), ms);
   }
 
   async start(): Promise<void> {
@@ -73,10 +140,33 @@ export class VaultIndex {
         else if (d.isFile() && d.name.toLowerCase().endsWith('.md')) files.push(toRel(this.root, abs));
       }
     }
-    for (let i = 0; i < files.length; i += 32) {
+    const c0 = performance.now();
+    const cache = await this.readCache();
+    const cached = new Map<string, CacheFile['notes'][number]>();
+    for (const e of cache?.notes ?? []) cached.set(e[0], e);
+    const fresh: string[] = []; // read + parsed now (new or changed since the cache)
+    for (let i = 0; i < files.length; i += 64) {
       if (this.closed) return;
-      await Promise.all(files.slice(i, i + 32).map((r) => this.load(r)));
+      await Promise.all(
+        files.slice(i, i + 64).map(async (r) => {
+          const c = cached.get(r);
+          if (c) {
+            try {
+              const st = await fsp.stat(path.join(this.root, r));
+              if (st.mtimeMs === c[1] && st.size === c[2]) {
+                this.notes.set(r, c[3]);
+                this.stamps.set(r, [c[1], c[2]]);
+                return;
+              }
+            } catch {
+              return;
+            }
+          }
+          if (await this.load(r)) fresh.push(r);
+        }),
+      );
     }
+    this.startInfo = { cached: this.notes.size - fresh.length, read: fresh.length, miniFromCache: false, cacheMs: 0 };
     this.rebuildNames();
     this.relinkAll();
     this.ready = true;
@@ -86,10 +176,29 @@ export class VaultIndex {
     // 0.0.9: tree/graph/board can show now; the full-text index builds in small chunks after this,
     // so the main process keeps answering IPC (addAll blocked it ~600-700 ms at 3k notes).
     this.emit({ dirs: [], files: [] });
-    await this.mini.addAllAsync([...this.notes.values()].map((n) => this.doc(n)), { chunkSize: 100 });
+    let restored = false;
+    if (cache?.mini) {
+      try {
+        const MS = MiniSearch as unknown as { loadJSAsync: (js: unknown, o: typeof MINI_OPTS) => Promise<MiniSearch> };
+        const m = await MS.loadJSAsync(cache.mini, MINI_OPTS);
+        // bring it up to date: drop removed/changed notes, add new/changed ones
+        const freshSet = new Set(fresh);
+        for (const rel of cached.keys()) if (m.has(rel) && (!this.notes.has(rel) || freshSet.has(rel))) m.discard(rel);
+        for (const rel of fresh) m.add(this.doc(this.notes.get(rel)!));
+        this.mini = m as typeof this.mini;
+        restored = true;
+      } catch (e) {
+        logWarn('index', 'index cache: full-text part unusable, rebuilding', e);
+        this.mini = this.newMini();
+      }
+    }
+    if (!restored) await this.mini.addAllAsync([...this.notes.values()].map((n) => this.doc(n)), { chunkSize: 100 });
     this.searchReady = true;
+    this.startInfo.miniFromCache = restored;
+    this.startInfo.cacheMs = Math.round(performance.now() - c0);
     if (this.closed) return;
     this.startWatcher();
+    if (this.cacheFile && (!cache || fresh.length || cached.size !== this.notes.size)) this.scheduleCacheSave(1500);
   }
 
   private startWatcher(): void {
@@ -158,6 +267,7 @@ export class VaultIndex {
         if (prev) {
           this.mini.discard(rel);
           this.notes.delete(rel);
+          this.stamps.delete(rel);
           namesChanged = true;
           changed.push(rel);
           this.onNote?.(rel, null);
@@ -193,6 +303,7 @@ export class VaultIndex {
       if (topo) this.topoVersion++;
     }
     if (changed.length || dirs.length) this.emit({ dirs, files });
+    if (batch.length) this.scheduleCacheSave();
   }
 
   private emit(fsChange: FsChange): void {
@@ -219,8 +330,11 @@ export class VaultIndex {
 
   private async load(rel: string): Promise<boolean> {
     try {
-      const content = await fsp.readFile(path.join(this.root, rel), 'utf8');
+      const abs = path.join(this.root, rel);
+      const st = await fsp.stat(abs); // stamp first: a write racing the read just makes the next start re-read
+      const content = await fsp.readFile(abs, 'utf8');
       this.notes.set(rel, { rel, title: titleOf(rel), content, parsed: parseNote(content) });
+      this.stamps.set(rel, [st.mtimeMs, st.size]);
       return true;
     } catch {
       return false;
@@ -393,6 +507,8 @@ export class VaultIndex {
     this.closed = true;
     if (this.timer) clearTimeout(this.timer);
     await this.watcher?.close();
+    if (this.cacheTimer) clearTimeout(this.cacheTimer);
+    if (this.cacheDirty) await this.saveCache();
   }
 }
 
