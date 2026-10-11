@@ -38,6 +38,10 @@ function render(md: string): string {
   return html;
 }
 
+// 0.0.9: warm marked + DOMPurify once the app is idle, so the first note open doesn't pay their JIT/setup cost.
+if (typeof window !== 'undefined' && 'requestIdleCallback' in window)
+  window.requestIdleCallback(() => void renderUncached('---\na: 1\n---\n# Warm\n\nSome *text* with [[a link]], `code`, a [url](https://example.com).\n\n- [ ] task\n- item\n\n| a | b |\n|---|---|\n| 1 | 2 |\n'), { timeout: 3000 });
+
 /** Markdown -> sanitized HTML; [[links]] become clickable anchors with data-wikilink. */
 function renderUncached(md: string): string {
   const body = md.replace(/^---\r?\n[\s\S]*?\r?\n---\s*\n?/, (fm) => '```yaml\n' + fm.replace(/^---\r?\n|\r?\n---\s*\n?$/g, '') + '\n```\n');
