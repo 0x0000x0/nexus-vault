@@ -144,9 +144,13 @@ export function BoardPane(p: Props) {
     if (el) {
       el.classList.add('camlive');
       el.style.backgroundPosition = `${v.x}px ${v.y}px`;
-      el.style.backgroundSize = `${18 * v.k}px ${18 * v.k}px`;
+      // only touch what changed: re-setting the label text replaces its text node and forces a layout every frame
+      const bs = `${18 * v.k}px ${18 * v.k}px`;
+      if (el.style.backgroundSize !== bs) el.style.backgroundSize = bs;
     }
-    if (zoomLblRef.current) zoomLblRef.current.textContent = `${Math.round(v.k * 100)}%`;
+    const lbl = zoomLblRef.current;
+    const pct = `${Math.round(v.k * 100)}%`;
+    if (lbl && lbl.textContent !== pct) lbl.textContent = pct;
   };
   const commitCam = () => {
     const v = liveCam.current;
