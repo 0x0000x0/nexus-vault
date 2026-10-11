@@ -38,6 +38,7 @@ export function App() {
   const [graph, setGraph] = useState<GraphData>(EMPTY_GRAPH);
   const [stats, setStats] = useState<IndexStats | null>(null);
   const indexSeen = useRef<{ topo?: number; names?: number }>({});
+  const shownPanes = useRef(new Set<'board' | 'graph'>());
   const [openRel, setOpenRel] = useState<string | null>(null);
   const [editReq, setEditReq] = useState(0);
   const [boardFolder, setBoardFolder] = useState('');
@@ -607,21 +608,45 @@ export function App() {
               )}
               {busy && <div className="banner"><div className="spin" />{busy}</div>}
               {sources && <Sources q={sources.q} hits={sources.hits} onClose={() => setSources(null)} />}
-              {layout.view === 'split' ? (
-                <>
-                  <div style={{ flex: `0 0 calc(${layout.paneRatio * 100}% - 3.5px)`, display: 'flex', minWidth: 0 }}>{left}</div>
-                  <Divider
-                    testId="div-panes"
-                    onStart={() => (dragStart.current = layout.paneRatio)}
-                    onDrag={(dx) => setLayout({ paneRatio: clampRatio(dragStart.current + dx / mainWidth()) }, false)}
-                    onEnd={(dx) => setLayout({ paneRatio: clampRatio(dragStart.current + dx / mainWidth()) })}
-                    onReset={() => setLayout({ paneRatio: DEFAULT_LAYOUT.paneRatio })}
-                  />
-                  <div style={{ flex: '1 1 0', display: 'flex', minWidth: 0 }}>{right}</div>
-                </>
-              ) : (
-                <div style={{ flex: 1, display: 'flex', minWidth: 0 }}>{layout.view === 'board' ? board : graphPane}</div>
-              )}
+              {(() => {
+                // 0.0.9: keep panes mounted across Split/Board/Graph switches (no graph re-layout, no board reload);
+                // a pane is created the first time it is shown and then only hidden.
+                const split = layout.view === 'split';
+                const leftKind = layout.paneOrder === 'board-graph' ? 'board' : 'graph';
+                const slot = (kind: 'board' | 'graph', el: React.ReactNode, isLeft: boolean) => {
+                  const visible = split || layout.view === kind;
+                  if (!visible && !shownPanes.current.has(kind)) return null;
+                  shownPanes.current.add(kind);
+                  const style: React.CSSProperties = !visible
+                    ? { display: 'none' }
+                    : split
+                      ? isLeft
+                        ? { flex: `0 0 calc(${layout.paneRatio * 100}% - 3.5px)`, display: 'flex', minWidth: 0 }
+                        : { flex: '1 1 0', display: 'flex', minWidth: 0 }
+                      : { flex: 1, display: 'flex', minWidth: 0 };
+                  return (
+                    <div key={kind} style={style}>
+                      {el}
+                    </div>
+                  );
+                };
+                return (
+                  <>
+                    {slot(leftKind, left, true)}
+                    {split ? (
+                      <Divider
+                        key="div"
+                        testId="div-panes"
+                        onStart={() => (dragStart.current = layout.paneRatio)}
+                        onDrag={(dx) => setLayout({ paneRatio: clampRatio(dragStart.current + dx / mainWidth()) }, false)}
+                        onEnd={(dx) => setLayout({ paneRatio: clampRatio(dragStart.current + dx / mainWidth()) })}
+                        onReset={() => setLayout({ paneRatio: DEFAULT_LAYOUT.paneRatio })}
+                      />
+                    ) : null}
+                    {slot(leftKind === 'board' ? 'graph' : 'board', right, false)}
+                  </>
+                );
+              })()}
             </div>
             {layout.notePanelOpen ? (
               <>
