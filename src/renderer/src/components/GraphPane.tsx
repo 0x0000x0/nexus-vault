@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ForceGraph2D, { type ForceGraphMethods, type NodeObject } from 'react-force-graph-2d';
 import type { GraphNode, ViewMode } from '../../../shared/types';
-import { folderColor, useApp } from '../ctx';
+import { folderColor, useApp, useIndexVersion } from '../ctx';
 import { GraphIcon } from './icons';
 import { MaxBtn } from './Panes';
 import { NavButtons } from './NavButtons';
@@ -36,6 +36,7 @@ const idOf = (v: string | N) => (typeof v === 'string' ? v : (v.id as string));
 export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWidth, onSizes, onCam, restoreCam, onGraphOpts }: Props) {
   const [showSettings, setShowSettings] = useState(false);
   const app = useApp();
+  const indexVersion = useIndexVersion();
   const wrapRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods<N, L>>();
   const [size, setSize] = useState({ w: 400, h: 300 });
@@ -353,7 +354,7 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
             </button>
           </div>
         )}
-        {app.graph.version < 0 || (app.graph.nodes.length === 0 && app.indexVersion <= 0) ? (
+        {app.graph.version < 0 || (app.graph.nodes.length === 0 && indexVersion <= 0) ? (
           <div className="placeholder">
             <div className="spin" />
             Indexing notes…

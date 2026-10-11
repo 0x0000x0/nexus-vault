@@ -5,7 +5,7 @@ import { ARCH_BOARD_KEY } from '../../../shared/arch';
 import { layoutArch, nodesInsideGroup } from '../../../shared/arch-layout';
 import type { BoardData, BoardEdge, BoardFile, BoardNode, BoardNodeType, DirEntry, FsChange, ViewMode } from '../../../shared/types';
 import { NavButtons } from './NavButtons';
-import { baseName, dirOf, errMsg, folderColor, noteTitle, useApp } from '../ctx';
+import { baseName, dirOf, errMsg, folderColor, noteTitle, useApp, useIndexVersion } from '../ctx';
 import { bbox, CARD, clipToRect, freeSlot, inside, normalizeBoard, normalizeUrl, uid } from './board-utils';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DRAG_MIME } from './FolderTree';
@@ -51,6 +51,7 @@ interface RenderEdge {
 
 export function BoardPane(p: Props) {
   const app = useApp();
+  const indexVersion = useIndexVersion();
   const { folder } = p;
   const wrapRef = useRef<HTMLDivElement>(null);
   const [file, setFile] = useState<BoardFile | null>(null);
@@ -176,7 +177,7 @@ export function BoardPane(p: Props) {
     return () => {
       live = false;
     };
-  }, [app.vault.path, p.readOnly, app.indexVersion]);
+  }, [app.vault.path, p.readOnly, indexVersion]);
 
   const noteSet = app.files;
   // Only prune/populate once the file list for this index is in (avoids wiping cards during a refresh race).
@@ -243,7 +244,7 @@ export function BoardPane(p: Props) {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [noteKey, app.indexVersion]);
+  }, [noteKey, indexVersion]);
   useEffect(() => {
     for (const n of board.nodes) {
       if (n.type === 'folder' && n.file !== undefined && !kids[n.file]) {

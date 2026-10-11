@@ -261,6 +261,10 @@ export interface IndexStats {
   notes: number;
   links: number;
   version: number;
+  /** 0.0.9: graph-visible changes only (links, ghosts, tags, note set). Absent = treat every change as topology. */
+  topo?: number;
+  /** 0.0.9: note path set changes only (create/delete/rename). */
+  names?: number;
 }
 export interface FsChange {
   dirs: string[]; // parent dirs (vault-relative) that changed

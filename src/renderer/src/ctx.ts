@@ -5,7 +5,6 @@ import type { GraphData, VaultInfo } from '../../shared/types';
 export interface AppActions {
   vault: VaultInfo;
   graph: GraphData;
-  indexVersion: number;
   files: Set<string>; // every indexed file (notes, or code files in repo mode)
   readOnly: boolean;
   fileLinks: [string, string][];
@@ -24,6 +23,11 @@ export interface AppActions {
 }
 
 export const Ctx = createContext<AppActions | null>(null);
+/** 0.0.9: index version in its own context so content edits only re-render what reads it. */
+export const IndexVersionCtx = createContext(0);
+export function useIndexVersion(): number {
+  return useContext(IndexVersionCtx);
+}
 export function useApp(): AppActions {
   const c = useContext(Ctx);
   if (!c) throw new Error('AppActions missing');

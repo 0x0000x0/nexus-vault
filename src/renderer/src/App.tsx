@@ -16,7 +16,7 @@ import { AiAccess } from './components/AiAccess';
 import { Snapshots } from './components/Snapshots';
 import { ToolStrip } from './components/ToolStrip';
 import { VaultPicker } from './components/VaultPicker';
-import { Ctx, dirOf, errMsg, type AppActions } from './ctx';
+import { Ctx, IndexVersionCtx, dirOf, errMsg, type AppActions } from './ctx';
 import { shortCode } from '../../shared/log-format';
 import { back as navBack, canBack, canForward, createNav, forward as navForward, push as navPush, replace as navReplace, type Cam, type NavSnap, type NavState } from './nav-history';
 
@@ -37,6 +37,7 @@ export function App() {
   const [banner, setBanner] = useState<{ text: string; err?: boolean; code?: string; detail?: string } | null>(null);
   const [graph, setGraph] = useState<GraphData>(EMPTY_GRAPH);
   const [stats, setStats] = useState<IndexStats | null>(null);
+  const indexSeen = useRef<{ topo?: number; names?: number }>({});
   const [openRel, setOpenRel] = useState<string | null>(null);
   const [editReq, setEditReq] = useState(0);
   const [boardFolder, setBoardFolder] = useState('');
@@ -138,6 +139,18 @@ export function App() {
     const offTheme = nexus.onSystemTheme(() => setSystemDark(darkQuery.matches));
     const offIndex = nexus.onIndexChanged((s) => {
       setStats(s);
+      // 0.0.9: content-only edits (same topology + same note set) keep the graph and file list as-is,
+      // so saving a note doesn't rebuild the graph, re-run its layout or re-render the tree/board.
+      const seen = indexSeen.current;
+      const sameTopo = s.topo !== undefined && seen.topo === s.topo;
+      const sameNames = s.names !== undefined && seen.names === s.names;
+      seen.topo = s.topo;
+      seen.names = s.names;
+      if (sameTopo && sameNames) return;
+      if (sameTopo) {
+        void nexus.listNotes().then((r) => setFiles(new Set(r.notes.map((n) => n.rel))));
+        return;
+      }
       // 0.0.8 perf: graph paints first, then notes, then fileLinks last (sequential,
       // not Promise.all). fileLinks is deferred until the Board pane needs it.
       const opts = graphOptsRef.current;
@@ -145,9 +158,9 @@ export function App() {
         .getGraph(opts)
         .then((g) => {
           setGraph(g);
-          return nexus.listNotes();
+          return sameNames ? null : nexus.listNotes();
         })
-        .then((r) => setFiles(new Set(r.notes.map((n) => n.rel))));
+        .then((r) => r && setFiles(new Set(r.notes.map((n) => n.rel))));
     });
     const offProg = nexus.onProgress((p) => setProg(p.label ? p : null));
     const mq = () => setSystemDark(darkQuery.matches);
@@ -179,9 +192,11 @@ export function App() {
     navRef.current = navPush(navRef.current, { boardFolder: '', boardView: { x: 0, y: 0, k: 0 }, graphCam: { x: 0, y: 0, k: 0 }, selected: null, openRel: null, notePanelOpen: layoutRef.current.notePanelOpen });
     setFiles(new Set());
     setFileLinks([]);
+    indexSeen.current = {};
     void nexus.listNotes().then((r) => {
       if (r.ready) {
         setStats(r.stats);
+        indexSeen.current = { topo: r.stats?.topo, names: r.stats?.names };
         setFiles(new Set(r.notes.map((n) => n.rel)));
         // 0.0.8 perf: graph first so it paints early, fileLinks last (deferred).
         void nexus.getGraph(graphOptsRef.current).then(setGraph);
@@ -385,7 +400,6 @@ export function App() {
     return {
       vault,
       graph,
-      indexVersion: stats?.version ?? 0,
       files,
       fileLinks,
       readOnly: vault.readOnly,
@@ -454,7 +468,7 @@ export function App() {
       },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vault, graph, stats?.version, files, fileLinks, ask, notify, navTick]);
+  }, [vault, graph, files, fileLinks, ask, notify, navTick]);
 
   if (!ready) return <div className="app" />;
 
@@ -546,6 +560,7 @@ export function App() {
           <VaultPicker recent={recent} busy={busy} onOpenCopy={() => void openCopy()} onOpenReal={() => void openReal()} onOpenRecent={(p) => void openRecent(p)} onRemove={(p) => void removeRecent(p)} onOpenCode={() => setRepoDrop(true)} />
         ) : (
           <Ctx.Provider value={actions}>
+            <IndexVersionCtx.Provider value={stats?.version ?? 0}>
             <FolderTree vault={vault} width={layout.treeWidth} selected={selected} openRel={openRel} onSelect={(rel) => setSelected(rel)} reveal={treeReveal} />
             <Divider
               testId="div-tree"
@@ -638,6 +653,7 @@ export function App() {
                 }}
               />
             )}
+            </IndexVersionCtx.Provider>
           </Ctx.Provider>
         )}
         {prompt && <PromptModal p={prompt} onDone={() => setPrompt(null)} />}

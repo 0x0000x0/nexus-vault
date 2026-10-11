@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FsChange, NoteFile, NoteInfo, SemanticHit } from '../../../shared/types';
-import { baseName, errMsg, noteTitle, useApp } from '../ctx';
+import { baseName, errMsg, noteTitle, useApp, useIndexVersion } from '../ctx';
 import { highlight } from '../highlight';
 
 interface Props {
@@ -35,6 +35,7 @@ function render(md: string): string {
 
 export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props) {
   const app = useApp();
+  const indexVersion = useIndexVersion();
   const [file, setFile] = useState<NoteFile | null>(null);
   const [text, setText] = useState('');
   const [mode, setMode] = useState<'preview' | 'edit'>('preview');
@@ -117,7 +118,7 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
     return () => {
       live = false;
     };
-  }, [rel, app.indexVersion]);
+  }, [rel, indexVersion]);
 
   // Related notes (semantic, only when enabled in settings).
   useEffect(() => {
@@ -137,7 +138,7 @@ export function NotePanel({ rel, editRequest, width, onClose, readOnly }: Props)
     return () => {
       live = false;
     };
-  }, [rel, readOnly, app.indexVersion]);
+  }, [rel, readOnly, indexVersion]);
 
   // External edits (Obsidian, Explorer) reload the note if we have no unsaved changes.
   useEffect(

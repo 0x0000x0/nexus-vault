@@ -33,6 +33,10 @@ export class VaultIndex {
   private timer: NodeJS.Timeout | null = null;
   private closed = false;
   version = 0;
+  /** 0.0.9: bumps only when graph-visible data changes (note set, resolved links, ghosts, tags). */
+  topoVersion = 0;
+  /** 0.0.9: bumps only when the set of note paths changes (create/delete/rename). */
+  namesVersion = 0;
   ready = false;
   /** Optional per-note change hook (semantic index). null content = removed. */
   onNote: ((rel: string, note: { title: string; content: string } | null) => void) | null = null;
@@ -76,6 +80,8 @@ export class VaultIndex {
     this.relinkAll();
     this.ready = true;
     this.version++;
+    this.topoVersion++;
+    this.namesVersion++;
     this.emit({ dirs: [], files: [] });
     this.startWatcher();
   }
@@ -91,14 +97,15 @@ export class VaultIndex {
       },
       awaitWriteFinish: { stabilityThreshold: 120, pollInterval: 40 },
     });
-    const q = (kind: 'upsert' | 'remove' | 'dir') => (abs: string) => {
+    const q = (kind: 'upsert' | 'remove' | 'dir', listingChanges = true) => (abs: string) => {
       const rel = toRel(this.root, abs);
-      this.pendingDirs.add(dirOf(rel));
+      // 0.0.9: a content change doesn't change any folder listing (no tree/board reload).
+      if (listingChanges) this.pendingDirs.add(dirOf(rel));
       if (kind === 'dir') this.pendingDirs.add(rel);
       else if (rel.toLowerCase().endsWith('.md')) this.pending.set(rel, kind);
       this.schedule();
     };
-    this.watcher.on('add', q('upsert')).on('change', q('upsert')).on('unlink', q('remove'));
+    this.watcher.on('add', q('upsert')).on('change', q('upsert', false)).on('unlink', q('remove'));
     this.watcher.on('addDir', q('dir')).on('unlinkDir', (abs: string) => {
       const rel = toRel(this.root, abs);
       for (const k of this.notes.keys()) if (k.startsWith(rel + '/')) this.pending.set(k, 'remove');
@@ -110,7 +117,7 @@ export class VaultIndex {
   /** Tell the index a file changed right now (used after our own writes so UI updates instantly). */
   touch(rel: string, kind: 'upsert' | 'remove' = 'upsert'): void {
     if (rel.toLowerCase().endsWith('.md')) this.pending.set(rel, kind);
-    this.pendingDirs.add(dirOf(rel));
+    if (kind === 'remove' || !this.notes.has(rel)) this.pendingDirs.add(dirOf(rel));
     this.schedule(60);
   }
   touchDir(rel: string): void {
@@ -132,26 +139,49 @@ export class VaultIndex {
     this.pending.clear();
     this.pendingDirs.clear();
     let namesChanged = false;
+    const changed: string[] = []; // notes whose content really changed (0.0.9: echo of our own write = no-op)
+    const prevTags = new Map<string, string[]>();
     for (const [rel, kind] of batch) {
-      const had = this.notes.has(rel);
-      if (had) this.mini.discard(rel);
+      const prev = this.notes.get(rel);
       if (kind === 'remove' || !(await this.load(rel))) {
-        this.notes.delete(rel);
-        namesChanged = namesChanged || had;
-        if (had) this.onNote?.(rel, null);
-      } else {
-        namesChanged = namesChanged || !had;
-        const n = this.notes.get(rel)!;
-        this.mini.add(this.doc(n));
-        this.onNote?.(rel, { title: n.title, content: n.content });
+        if (prev) {
+          this.mini.discard(rel);
+          this.notes.delete(rel);
+          namesChanged = true;
+          changed.push(rel);
+          this.onNote?.(rel, null);
+        }
+        continue;
       }
+      const n = this.notes.get(rel)!;
+      if (prev && prev.content === n.content) {
+        // Same bytes we already indexed (watcher echo of our own save, or a touch without edits).
+        this.notes.set(rel, prev);
+        continue;
+      }
+      if (prev) {
+        this.mini.discard(rel);
+        prevTags.set(rel, prev.parsed.tags);
+      } else namesChanged = true;
+      this.mini.add(this.doc(n));
+      changed.push(rel);
+      this.onNote?.(rel, { title: n.title, content: n.content });
     }
-    if (batch.length) {
-      if (namesChanged) this.rebuildNames();
-      this.relinkAll();
+    const files = changed;
+    if (changed.length) {
+      let topo = namesChanged;
+      if (namesChanged) {
+        this.rebuildNames();
+        this.relinkAll();
+        this.namesVersion++;
+      } else {
+        // 0.0.9: content-only edits re-resolve just the edited notes (names unchanged => nobody else's links move).
+        for (const rel of changed) if (this.relinkOne(rel, prevTags.get(rel) ?? [])) topo = true;
+      }
       this.version++;
+      if (topo) this.topoVersion++;
     }
-    this.emit({ dirs, files: batch.map(([r]) => r) });
+    if (changed.length || dirs.length) this.emit({ dirs, files });
   }
 
   private emit(fsChange: FsChange): void {
@@ -173,7 +203,7 @@ export class VaultIndex {
   stats(): IndexStats {
     let links = 0;
     for (const s of this.out.values()) links += s.size;
-    return { notes: this.notes.size, links, version: this.version };
+    return { notes: this.notes.size, links, version: this.version, topo: this.topoVersion, names: this.namesVersion };
   }
 
   private async load(rel: string): Promise<boolean> {
@@ -202,21 +232,43 @@ export class VaultIndex {
     }
   }
 
+  /** Resolve one note's links into out/ghosts sets (pure w.r.t. the name maps). */
+  private linkSets(n: NoteRec): { set: Set<string>; gh: Set<string> } {
+    const set = new Set<string>();
+    const gh = new Set<string>();
+    for (const l of n.parsed.links) {
+      if (!l.target) continue;
+      const r = resolveTarget(l.target, n.rel, this.byName, this.byPath, l.kind);
+      if (r && r !== n.rel) set.add(r);
+      else if (!r && !/\.[a-z0-9]{1,5}$/i.test(l.target.replace(/\.md$/i, '')) && l.kind === 'wiki') gh.add(l.target.split('/').pop()!.trim());
+    }
+    return { set, gh };
+  }
+
   private relinkAll(): void {
     this.out.clear();
     this.ghosts.clear();
     for (const n of this.notes.values()) {
-      const set = new Set<string>();
-      const gh = new Set<string>();
-      for (const l of n.parsed.links) {
-        if (!l.target) continue;
-        const r = resolveTarget(l.target, n.rel, this.byName, this.byPath, l.kind);
-        if (r && r !== n.rel) set.add(r);
-        else if (!r && !/\.[a-z0-9]{1,5}$/i.test(l.target.replace(/\.md$/i, '')) && l.kind === 'wiki') gh.add(l.target.split('/').pop()!.trim());
-      }
+      const { set, gh } = this.linkSets(n);
       this.out.set(n.rel, set);
       if (gh.size) this.ghosts.set(n.rel, gh);
     }
+  }
+
+  /**
+   * 0.0.9: re-resolve one edited note (names unchanged). Returns true when anything the graph shows
+   * changed (resolved links, ghost links or tags), so the cached graph can be kept otherwise.
+   */
+  private relinkOne(rel: string, prevTags: string[]): boolean {
+    const n = this.notes.get(rel);
+    if (!n) return false;
+    const oldOut = this.out.get(rel) ?? new Set<string>();
+    const oldGh = this.ghosts.get(rel) ?? new Set<string>();
+    const { set, gh } = this.linkSets(n);
+    this.out.set(rel, set);
+    if (gh.size) this.ghosts.set(rel, gh);
+    else this.ghosts.delete(rel);
+    return !sameSet(oldOut, set) || !sameSet(oldGh, gh) || prevTags.join('\0') !== n.parsed.tags.join('\0');
   }
 
   resolve(target: string, from: string): string | null {
@@ -235,16 +287,16 @@ export class VaultIndex {
    * opts.mode === 'full'; opts.expand opens one folder group. Cached per index version (0.0.8).
    */
   graph(opts: GraphOpts = {}): GraphData {
-    if (this.graphCacheVersion !== this.version) {
+    if (this.graphCacheVersion !== this.topoVersion) {
       this.graphCache.clear();
-      this.graphCacheVersion = this.version;
+      this.graphCacheVersion = this.topoVersion;
     }
     const collapse = opts.mode !== 'full' && this.notes.size > COLLAPSE_ABOVE_NOTES;
     const key = collapse ? `c:${opts.expand ?? ''}` : 'full';
     const hit = this.graphCache.get(key);
     if (hit) return hit;
     const notes = [...this.notes.values()].map((n) => ({ rel: n.rel, title: n.title, tags: n.parsed.tags }));
-    const g = collapse ? collapsedNoteGraph(notes, this.out, this.ghosts, this.version, norm, opts.expand ?? null) : fullNoteGraph(notes, this.out, this.ghosts, this.version, norm);
+    const g = collapse ? collapsedNoteGraph(notes, this.out, this.ghosts, this.topoVersion, norm, opts.expand ?? null) : fullNoteGraph(notes, this.out, this.ghosts, this.topoVersion, norm);
     if (this.graphCache.size >= 6) this.graphCache.delete(this.graphCache.keys().next().value as string);
     this.graphCache.set(key, g);
     return g;
@@ -344,4 +396,10 @@ export function previewText(content: string): string {
   s = s.replace(/^#{1,6}\s+/gm, '').replace(/^\s*[-*+]\s+\[[ xX]\]\s*/gm, '☐ ').replace(/^\s*[-*+]\s+/gm, '• ');
   s = s.replace(/[*_`>~]/g, '');
   return s.replace(/\n{2,}/g, '\n').trim().slice(0, 280);
+}
+
+function sameSet(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const x of a) if (!b.has(x)) return false;
+  return true;
 }
