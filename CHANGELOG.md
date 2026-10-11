@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.0.9
+
+Speed release. Measured on a generated 3,000-note sample vault (before -> after).
+
+### Changed
+- **Startup** — time to interactive 1.92 s -> 1.11 s (500 notes: 1.31 s -> 0.99 s; code view, 2k files: 1.46 s -> 1.05 s; 8k files: 3.05 s -> 1.62 s)
+- **Index in its own process** — notes and code indexing run in an Electron utility process; the main process is no longer blocked while the full-text index builds (about 600 ms -> 40 ms)
+- **Saved index cache** — the index is saved in app data and reused on the next launch; only changed notes are re-read (index start about 0.9 s -> 0.45 s on 3,000 notes)
+- **One incremental index update per save** instead of several
+- **Note open** — p95 279 ms -> 86 ms (note first, Sources panel right after; rendered-HTML cache; Markdown renderer warmed up while idle)
+- **Ctrl+K** — results in about 20 ms (was about 73 ms); quick search p95 46 ms -> 23 ms
+- **Graph** — hover and zoom off React, batched node painting, layout in a Web Worker, frame loop paused while hidden: 38/45 fps -> 60/60 fps (wheel/hover)
+- **Board** — pan and zoom without React renders: pan 53 -> 60 fps, zoom 37 -> 49 fps
+- **Smaller bundle** — renderer JS is minified (924 kB -> 520 kB); memory use about 15% lower
+
+### Tests
+- Unit tests for index startup, the index cache (edits, adds, deletes and renames while closed match a cold index; a corrupt cache is ignored) and the index process wiring
+
 ## 0.0.8
 
 Speed release for big vaults (~2,500+ notes) and big folders. Plan: `PERF-PLAN.md`.
