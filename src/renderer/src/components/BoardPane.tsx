@@ -1,5 +1,5 @@
 // Milanote + IcePanel style board: note/folder/text/group/image/link cards, lines, drill-down (Grok Bot).
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ArchModel } from '../../../shared/arch';
 import { ARCH_BOARD_KEY } from '../../../shared/arch';
 import { layoutArch, nodesInsideGroup } from '../../../shared/arch-layout';
@@ -83,8 +83,16 @@ export function BoardPane(p: Props) {
   const view = board.view ?? { x: 0, y: 0, k: 1 };
   const boardRef = useRef(board);
   boardRef.current = board;
-  const viewRef = useRef(view);
-  viewRef.current = view;
+  // Live camera: pan/wheel move the world via direct style writes (no React render, no board update per frame);
+  // the view is committed to board state (and saved) once the gesture ends.
+  const liveCam = useRef<{ x: number; y: number; k: number } | null>(null);
+  const camTimer = useRef<number | null>(null);
+  const worldRef = useRef<HTMLDivElement | null>(null);
+  const zoomLblRef = useRef<HTMLSpanElement | null>(null);
+  const liveKey = useRef('');
+  const cam = (liveKey.current === boardKey && liveCam.current) || view;
+  const viewRef = useRef(cam);
+  viewRef.current = cam;
 
   // ---------- persistence ----------
   useEffect(() => {
@@ -117,7 +125,46 @@ export function BoardPane(p: Props) {
     },
     [boardKey, flush],
   );
-  const setView = (v: { x: number; y: number; k: number }) => update((b) => ({ ...b, view: v }));
+  const setView = (v: { x: number; y: number; k: number }) => {
+    if (camTimer.current) window.clearTimeout(camTimer.current);
+    camTimer.current = null;
+    liveCam.current = null;
+    viewRef.current = v;
+    wrapRef.current?.classList.remove('camlive');
+    update((b) => ({ ...b, view: v }));
+  };
+  /** Move the camera without a React render; commit later with commitCam(). */
+  const moveCam = (v: { x: number; y: number; k: number }) => {
+    liveCam.current = v;
+    liveKey.current = boardKey;
+    viewRef.current = v;
+    const w = worldRef.current;
+    if (w) w.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.k})`;
+    const el = wrapRef.current;
+    if (el) {
+      el.classList.add('camlive');
+      el.style.backgroundPosition = `${v.x}px ${v.y}px`;
+      el.style.backgroundSize = `${18 * v.k}px ${18 * v.k}px`;
+    }
+    if (zoomLblRef.current) zoomLblRef.current.textContent = `${Math.round(v.k * 100)}%`;
+  };
+  const commitCam = () => {
+    const v = liveCam.current;
+    if (!v) return;
+    const key = liveKey.current;
+    if (camTimer.current) window.clearTimeout(camTimer.current);
+    camTimer.current = null;
+    liveCam.current = null;
+    wrapRef.current?.classList.remove('camlive');
+    update((b) => ({ ...b, view: v }), key);
+  };
+  const commitCamRef = useRef(commitCam);
+  commitCamRef.current = commitCam;
+  useEffect(() => () => commitCamRef.current(), []);
+  // Switching boards mid-gesture: commit the camera to the board it belongs to.
+  useLayoutEffect(() => {
+    if (liveCam.current && liveKey.current !== boardKey) commitCamRef.current();
+  }, [boardKey]);
 
   // ---------- folder contents ----------
   const loadEntries = useCallback(async () => {
@@ -589,8 +636,9 @@ export function BoardPane(p: Props) {
       let nd: Drag = d;
       if (d.kind === 'pan') {
         const moved = d.moved || Math.abs(ev.clientX - d.sx) + Math.abs(ev.clientY - d.sy) > 3;
+        moveCam({ k: viewRef.current.k, x: d.vx + ev.clientX - d.sx, y: d.vy + ev.clientY - d.sy });
+        if (moved === d.moved) return; // nothing React needs to know
         nd = { ...d, moved };
-        update((b) => ({ ...b, view: { k: viewRef.current.k, x: d.vx + ev.clientX - d.sx, y: d.vy + ev.clientY - d.sy } }));
       } else if (d.kind === 'move') {
         const k = viewRef.current.k;
         const dx = (ev.clientX - d.sx) / k;
@@ -618,6 +666,7 @@ export function BoardPane(p: Props) {
       dragRef.current = null;
       setDrag(null);
       if (!d) return;
+      if (d.kind === 'pan') commitCamRef.current();
       if (d.kind === 'pan' && !d.moved) {
         setSel(new Set());
         setSelEdge(null);
@@ -648,7 +697,7 @@ export function BoardPane(p: Props) {
     if (ev.shiftKey && ev.button === 0) {
       const w = toWorld(ev.clientX, ev.clientY);
       startDrag({ kind: 'marquee', x0: w.x, y0: w.y, x1: w.x, y1: w.y, add: new Set(sel) });
-    } else startDrag({ kind: 'pan', sx: ev.clientX, sy: ev.clientY, vx: view.x, vy: view.y, moved: false });
+    } else startDrag({ kind: 'pan', sx: ev.clientX, sy: ev.clientY, vx: viewRef.current.x, vy: viewRef.current.y, moved: false });
   };
 
   const onNodePointerDown = (ev: React.PointerEvent, n: BoardNode) => {
@@ -688,8 +737,10 @@ export function BoardPane(p: Props) {
       const k = Math.max(0.1, Math.min(3, v.k * Math.exp(-ev.deltaY * 0.0015)));
       const mx = ev.clientX - r.left;
       const my = ev.clientY - r.top;
-      setView({ k, x: mx - ((mx - v.x) / v.k) * k, y: my - ((my - v.y) / v.k) * k });
-    } else setView({ ...v, x: v.x - ev.deltaY });
+      moveCam({ k, x: mx - ((mx - v.x) / v.k) * k, y: my - ((my - v.y) / v.k) * k });
+    } else moveCam({ ...v, x: v.x - ev.deltaY });
+    if (camTimer.current) window.clearTimeout(camTimer.current);
+    camTimer.current = window.setTimeout(() => commitCamRef.current(), 160);
   };
   const zoomBy = (f: number) => {
     const el = wrapRef.current!;
@@ -1134,11 +1185,11 @@ export function BoardPane(p: Props) {
         </div>
       </div>
       <div
-        className={`canvas board${p.lineMode ? ' linemode' : ''}${dropHint ? ' drophint' : ''}${drag?.kind === 'pan' && drag.moved ? ' panning' : ''}`}
+        className={`canvas board${p.lineMode ? ' linemode' : ''}${dropHint ? ' drophint' : ''}${drag?.kind === 'pan' && drag.moved ? ' panning' : ''}${liveKey.current === boardKey && liveCam.current ? ' camlive' : ''}`}
         ref={wrapRef}
         tabIndex={0}
         data-testid="board-canvas"
-        style={{ backgroundPosition: `${view.x}px ${view.y}px`, backgroundSize: `${18 * view.k}px ${18 * view.k}px` }}
+        style={{ backgroundPosition: `${cam.x}px ${cam.y}px`, backgroundSize: `${18 * cam.k}px ${18 * cam.k}px` }}
         onPointerDown={onBgPointerDown}
         onWheel={onWheel}
         onKeyDown={onKeyDown}
@@ -1147,7 +1198,7 @@ export function BoardPane(p: Props) {
         onDrop={onDrop}
         onContextMenu={(ev) => nodeMenu(ev, null)}
       >
-        <div className="world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
+        <div className="world" ref={worldRef} style={{ transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.k})` }}>
           <svg className="edges" width="1" height="1">
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -1194,7 +1245,7 @@ export function BoardPane(p: Props) {
         {p.lineMode && <div className="modehint">Line tool: drag from one card to another · Esc to stop</div>}
         <div className="zoombar" onPointerDown={(e) => e.stopPropagation()}>
           <button onClick={() => zoomBy(1 / 1.2)} title="Zoom out">−</button>
-          <span>{Math.round(view.k * 100)}%</span>
+          <span ref={zoomLblRef}>{Math.round(cam.k * 100)}%</span>
           <button onClick={() => zoomBy(1.2)} title="Zoom in">+</button>
           <button onClick={fit} title="Zoom to fit">⤢</button>
         </div>

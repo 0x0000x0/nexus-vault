@@ -229,6 +229,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .crumbs button.cur { color: var(--text); font-weight: 600; }
 .crumbs .sep { color: var(--faint); }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+/* 0.0.9: during a pan/zoom gesture the world is its own layer, so moving it composites instead of repainting every card. */
+.canvas.camlive .world { will-change: transform; }
 .edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .edge .vis { stroke: var(--faint); stroke-width: 1.6; }
 .edge.board .vis { stroke-dasharray: 6 4; }
