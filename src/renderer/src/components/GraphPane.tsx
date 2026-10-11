@@ -44,6 +44,14 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
   const wrapRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods<N, L>>();
   const [size, setSize] = useState({ w: 400, h: 300 });
+  // 0.0.9: the pane stays mounted when Board is shown alone; stop its frame loop while hidden.
+  const hidden = view === 'board';
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    if (hidden) fg.pauseAnimation();
+    else fg.resumeAnimation();
+  }, [hidden]);
   // 0.0.8 perf: canvas paint callbacks read this ref so hover repaints don't wait on React.
   const hoverRef = useRef<string | null>(null);
   // Last computed view box (graph coords, padded) for viewport culling.
@@ -380,6 +388,84 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
     ctx.restore();
   };
 
+  // 0.0.9: nodes visible this frame (collected by nodeCanvasObject), painted in a few batched fills.
+  const frameNodes = useRef<N[]>([]);
+  const paintNodes = (ctx: CanvasRenderingContext2D, scale: number) => {
+    const list = frameNodes.current;
+    if (!list.length) return;
+    const hov = hoverRef.current;
+    const nb = hov ? neighbors.get(hov) : undefined;
+    const isDim = (id: string) => !!nb && id !== hov && !nb.has(id);
+    // circles: one path + fill per (colour, dim) bucket
+    const buckets = new Map<string, N[]>();
+    for (const n of list) {
+      const key = (n.ghost ? colors.ghost : folderColor(n.folder, folders)) + (isDim(n.id as string) ? '|d' : '|');
+      let b = buckets.get(key);
+      if (!b) buckets.set(key, (b = []));
+      b.push(n);
+    }
+    ctx.save();
+    for (const [key, ns] of buckets) {
+      const bar = key.lastIndexOf('|');
+      ctx.globalAlpha = key.endsWith('|d') ? 0.15 : 1;
+      ctx.fillStyle = key.slice(0, bar);
+      ctx.beginPath();
+      for (const n of ns) {
+        const r = nodeR(n, scale);
+        ctx.moveTo(n.x! + r, n.y!);
+        ctx.arc(n.x!, n.y!, r, 0, 2 * Math.PI);
+      }
+      ctx.fill();
+    }
+    // ghost outlines
+    ctx.strokeStyle = colors.text;
+    ctx.lineWidth = 0.8 / scale;
+    for (const dim of [false, true]) {
+      ctx.beginPath();
+      let any = false;
+      for (const n of list) {
+        if (!n.ghost || isDim(n.id as string) !== dim) continue;
+        const r = nodeR(n, scale);
+        ctx.moveTo(n.x! + r, n.y!);
+        ctx.arc(n.x!, n.y!, r, 0, 2 * Math.PI);
+        any = true;
+      }
+      if (!any) continue;
+      ctx.globalAlpha = (dim ? 0.15 : 1) * 0.4;
+      ctx.stroke();
+    }
+    // selection / hover rings
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = '#8b6cf6';
+    ctx.lineWidth = 1.5 / scale;
+    for (const n of list) {
+      const id = n.id as string;
+      if (id !== selected && id !== hov) continue;
+      ctx.beginPath();
+      ctx.arc(n.x!, n.y!, nodeR(n, scale) + 2.5 / scale, 0, 2 * Math.PI);
+      ctx.stroke();
+    }
+    // labels
+    const fs = (nCount >= LARGE ? 12 : 11) / scale;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = colors.text;
+    let font = '';
+    for (const n of list) {
+      const id = n.id as string;
+      const important = !!(id === hov || id === selected || (nb && nb.has(id)));
+      // While the engine is still running on a large graph, only important nodes (or zoomed-in views) pay for fillText.
+      if (nCount >= LARGE && engineRunning.current && !important && scale < 2) continue;
+      if (!shouldShowLabel({ n: nCount, scale, degree: n.degree ?? 0, labelDegree, important, showLabels })) continue;
+      const f = `${important ? 600 : 400} ${fs}px "Segoe UI", system-ui, sans-serif`;
+      if (f !== font) ctx.font = font = f;
+      const fade = important ? 1 : nCount >= LARGE ? 1 : Math.max(0, Math.min(1, (scale - 0.6) / 0.8));
+      ctx.globalAlpha = (isDim(id) ? 0.15 : n.ghost ? 0.55 : 0.9) * fade;
+      ctx.fillText(n.title, n.x!, n.y! + nodeR(n, scale) + 2 / scale);
+    }
+    ctx.restore();
+  };
+
   /** 0.0.9: layout is final (engine stopped or worker done): cache positions, then the first-fit camera. */
   const settled = () => {
     if (data.nodes.length) savePositions(posKey, data.nodes);
@@ -545,8 +631,10 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
             const gt = ctx.getTransform();
             const box = viewBoxFromTransform({ a: gt.a, e: gt.e, f: gt.f }, ctx.canvas.width, ctx.canvas.height, 80);
             viewBoxRef.current = box;
+            frameNodes.current.length = 0;
             paintLinks(ctx, scale, box);
           }}
+          onRenderFramePost={(ctx, scale) => paintNodes(ctx, scale)}
           onZoomEnd={reportCam}
           warmupTicks={budget.warmupTicks}
           onEngineStop={() => {
@@ -592,61 +680,11 @@ export function GraphPane({ view, onMax, dark, selected, focus, nodeSize, linkWi
             n.fy = undefined;
             fgRef.current?.d3ReheatSimulation();
           }}
-          nodeCanvasObject={(n, ctx, scale) => {
+          nodeCanvasObject={(n, _ctx, scale) => {
+            // 0.0.9: only collect here; paintNodes() draws all visible nodes batched by colour after this pass.
             const id = n.id as string;
-            const hov = hoverRef.current;
-            const r = nodeR(n, scale);
-            // Viewport cull (box computed once per frame in onRenderFramePre); never cull selected/hover.
-            const box = viewBoxRef.current;
-            if (id !== selected && id !== hov && !inBox(box, n.x, n.y, r)) return;
-            const nb = hov ? neighbors.get(hov) : undefined;
-            const dim = !!nb && id !== hov && !nb.has(id);
-            const color = n.ghost ? colors.ghost : folderColor(n.folder, folders);
-            ctx.globalAlpha = dim ? 0.15 : 1;
-            ctx.beginPath();
-            ctx.arc(n.x!, n.y!, r, 0, 2 * Math.PI);
-            ctx.fillStyle = color;
-            ctx.fill();
-            if (n.ghost) {
-              ctx.strokeStyle = colors.text;
-              ctx.globalAlpha *= 0.4;
-              ctx.lineWidth = 0.8 / scale;
-              ctx.stroke();
-              ctx.globalAlpha = dim ? 0.15 : 1;
-            }
-            if (id === selected || id === hov) {
-              ctx.beginPath();
-              ctx.arc(n.x!, n.y!, r + 2.5 / scale, 0, 2 * Math.PI);
-              ctx.strokeStyle = '#8b6cf6';
-              ctx.lineWidth = 1.5 / scale;
-              ctx.stroke();
-            }
-            const important = !!(id === hov || id === selected || (nb && nb.has(id)));
-            // While the engine is still running on a large graph, only important
-            // nodes (or zoomed-in views) pay for fillText.
-            if (nCount >= LARGE && engineRunning.current && !important && scale < 2) {
-              ctx.globalAlpha = 1;
-              return;
-            }
-            const show = shouldShowLabel({
-              n: nCount,
-              scale,
-              degree: n.degree ?? 0,
-              labelDegree,
-              important,
-              showLabels,
-            });
-            if (show) {
-              const fade = important ? 1 : nCount >= LARGE ? 1 : Math.max(0, Math.min(1, (scale - 0.6) / 0.8));
-              const fs = (nCount >= LARGE ? 12 : 11) / scale;
-              ctx.font = `${important ? 600 : 400} ${fs}px "Segoe UI", system-ui, sans-serif`;
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'top';
-              ctx.fillStyle = colors.text;
-              ctx.globalAlpha = (dim ? 0.15 : n.ghost ? 0.55 : 0.9) * fade;
-              ctx.fillText(n.title, n.x!, n.y! + r + 2 / scale);
-            }
-            ctx.globalAlpha = 1;
+            if (id !== selected && id !== hoverRef.current && !inBox(viewBoxRef.current, n.x, n.y, nodeR(n, scale))) return;
+            frameNodes.current.push(n);
           }}
           nodePointerAreaPaint={(n, color, ctx, scale) => {
             const id = n.id as string;
