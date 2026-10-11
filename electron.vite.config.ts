@@ -13,6 +13,6 @@ export default defineConfig({
     root: 'src/renderer',
     base: './',
     esbuild: { jsx: 'automatic' },
-    build: { outDir: 'out/renderer', rollupOptions: { input: resolve(__dirname, 'src/renderer/index.html') } },
+    build: { outDir: 'out/renderer', minify: 'esbuild', rollupOptions: { input: resolve(__dirname, 'src/renderer/index.html') } },
   },
 });
